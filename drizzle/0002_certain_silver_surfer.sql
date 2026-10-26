@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "club_name_location_unique" ON "clubs" USING btree ("name","city","state","country");--> statement-breakpoint
+CREATE UNIQUE INDEX "season_name_unique" ON "seasons" USING btree ("name");

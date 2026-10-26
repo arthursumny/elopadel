@@ -1,0 +1,1 @@
+ALTER TABLE "match_searches" ADD COLUMN "timezone_offset" integer DEFAULT 180 NOT NULL;

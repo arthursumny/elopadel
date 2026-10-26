@@ -1,0 +1,1 @@
+ALTER TABLE "match_participants" ADD COLUMN "result_winner" text;

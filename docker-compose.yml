@@ -1,0 +1,63 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:${PORT_WEB:-37421}:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+      # As rotas leem ADMIN_KEY e MAINTENANCE_TOKEN. Os nomes *_API_KEY abaixo
+      # são apenas aliases legados de transição para deploys antigos.
+      ADMIN_KEY: ${ADMIN_KEY:-${ADMIN_API_KEY:-}}
+      MAINTENANCE_TOKEN: ${MAINTENANCE_TOKEN:-${MAINTENANCE_API_KEY:-}}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://elopadel.avaliacoes.tech}
+      # Runtime do servidor: /api/auth/config entrega este ID ao cliente web.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      ALLOW_MOCK_AUTH: ${ALLOW_MOCK_AUTH:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_PROVIDER_URL: ${EMAIL_PROVIDER_URL:-}
+      EMAIL_PROVIDER_TOKEN: ${EMAIL_PROVIDER_TOKEN:-}
+      PORT: 3000
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - dokploy-network
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-elo_padel}
+      POSTGRES_USER: ${POSTGRES_USER:-elo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elo}
+    expose:
+      - "5432"
+    volumes:
+      - elo_padel_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elo} -d ${POSTGRES_DB:-elo_padel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      default:
+        aliases:
+          - elo_padel_db
+
+volumes:
+  elo_padel_pgdata:
+
+networks:
+  dokploy-network:
+    external: true

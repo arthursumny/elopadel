@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "season_stats_season_user_unique" ON "season_stats" USING btree ("season_id","user_id");
