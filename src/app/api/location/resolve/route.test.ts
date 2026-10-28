@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   configured: vi.fn(),
   validate: vi.fn(),
   resolve: vi.fn(),
+  resolveFriendly: vi.fn(),
   issue: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock('@/lib/location', () => ({
   isGeoapifyConfigured: mocks.configured,
   validateLocationMeasurement: mocks.validate,
   resolveCoordinatesToActiveClubLocation: mocks.resolve,
+  resolveFriendlyLocation: mocks.resolveFriendly,
   issueLocationToken: mocks.issue,
   LocationServiceError: class LocationServiceError extends Error { code: string; constructor(code: string) { super(code); this.code = code; } },
 }));
@@ -34,6 +36,7 @@ describe('POST /api/location/resolve', () => {
     mocks.consumeRateLimit.mockResolvedValue(true);
     mocks.validate.mockReturnValue({ valid: true, measurement: { latitude: -27, longitude: -51, accuracy: 20, timestamp: Date.now() } });
     mocks.resolve.mockResolvedValue({ city: 'Joaçaba', state: 'SC', country: 'Brasil' });
+    mocks.resolveFriendly.mockResolvedValue({ city: 'Joaçaba', state: 'SC', country: 'Brasil' });
     mocks.issue.mockResolvedValue({ token: 'signed-location-proof', expiresAt: '2026-10-26T12:05:00.000Z' });
   });
 
@@ -63,7 +66,7 @@ describe('POST /api/location/resolve', () => {
     const response = await POST(request({ latitude: -27, longitude: -51, accuracy: 20, timestamp: Date.now() }));
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body).toEqual({ location: { city: 'Joaçaba', state: 'SC', country: 'Brasil', token: 'signed-location-proof', expiresAt: '2026-10-26T12:05:00.000Z' } });
+    expect(body).toEqual({ location: { city: 'Joaçaba', state: 'SC', country: 'Brasil', token: 'signed-location-proof', expiresAt: '2026-10-26T12:05:00.000Z', source: 'gps' } });
     expect(mocks.resolve).toHaveBeenCalledWith(-27, -51);
     expect(mocks.issue).toHaveBeenCalledWith('user-1', { city: 'Joaçaba', state: 'SC', country: 'Brasil' });
     expect(JSON.stringify(body)).not.toContain('-27');
@@ -77,5 +80,21 @@ describe('POST /api/location/resolve', () => {
     mocks.resolve.mockRejectedValue({ code: 'NOT_FOUND' });
     const unsupported = await POST(request({}));
     expect(unsupported.status).toBe(422);
+  });
+
+  it('accepts a manually declared city even without Geoapify and marks the proof as manual', async () => {
+    mocks.configured.mockReturnValue(false);
+    const response = await POST(request({ city: ' Joaçaba ' }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.location).toMatchObject({ city: 'Joaçaba', state: 'SC', token: 'signed-location-proof', source: 'manual' });
+    expect(mocks.resolveFriendly).toHaveBeenCalledWith('Joaçaba');
+    expect(mocks.issue).toHaveBeenCalledWith('user-1', { city: 'Joaçaba', state: 'SC', country: 'Brasil' }, expect.any(Number), 'manual');
+    expect(mocks.validate).not.toHaveBeenCalled();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+
+    mocks.resolveFriendly.mockResolvedValue(null);
+    expect((await POST(request({ city: 'Cidade Fantasma' }))).status).toBe(422);
+    expect((await POST(request({ city: '   ' }))).status).toBe(400);
   });
 });

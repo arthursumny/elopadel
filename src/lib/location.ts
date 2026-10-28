@@ -6,6 +6,13 @@ import { clubs } from '@/lib/db/schema';
 import { areCanonicalLocationsEqual, mapGeoapifyFeaturesToClubLocation, normalizeBrazilianState, normalizeBrazilCountry, normalizeLocationText, type CanonicalLocation } from '@/lib/location-domain';
 
 export const LOCATION_TOKEN_TTL_SECONDS = 5 * 60;
+/**
+ * A confirmação serve para resolver a CIDADE da busca, não a quadra. Leituras de
+ * navegador em desktop usam Wi-Fi/IP e costumam entregar 500 m a 5 km de erro,
+ * então o limite aceita qualquer leitura suficiente para geocodificar a cidade.
+ */
+export const LOCATION_MAX_ACCURACY_METERS = 5_000;
+export type LocationSource = 'gps' | 'manual';
 const GEOAPIFY_REVERSE_URL = 'https://api.geoapify.com/v1/geocode/reverse';
 const GEOAPIFY_TIMEOUT_MS = 5_000;
 
@@ -15,7 +22,7 @@ export class LocationServiceError extends Error {
   }
 }
 
-export type VerifiedLocation = CanonicalLocation & { expiresAt: string };
+export type VerifiedLocation = CanonicalLocation & { expiresAt: string; source: LocationSource };
 export type LocationMeasurement = { latitude: number; longitude: number; accuracy: number; timestamp: number };
 
 export function validateLocationMeasurement(body: unknown, now = Date.now()): { valid: true; measurement: LocationMeasurement } | { valid: false; status: 400 | 422; error: string } {
@@ -28,7 +35,7 @@ export function validateLocationMeasurement(body: unknown, now = Date.now()): { 
   if ((latitude as number) < -90 || (latitude as number) > 90 || (longitude as number) < -180 || (longitude as number) > 180) {
     return { valid: false, status: 422, error: 'As coordenadas estão fora dos limites válidos.' };
   }
-  if ((accuracy as number) < 0 || (accuracy as number) > 100) return { valid: false, status: 422, error: 'A precisão da localização precisa ser de até 100 metros.' };
+  if ((accuracy as number) < 0 || (accuracy as number) > LOCATION_MAX_ACCURACY_METERS) return { valid: false, status: 422, error: 'A localização está imprecisa. Ative a localização precisa do dispositivo ou informe sua cidade manualmente.' };
   if ((timestamp as number) > now + 30_000 || now - (timestamp as number) > 5 * 60_000) return { valid: false, status: 422, error: 'A localização precisa ter sido capturada nos últimos cinco minutos.' };
   return { valid: true, measurement: { latitude: latitude as number, longitude: longitude as number, accuracy: accuracy as number, timestamp: timestamp as number } };
 }
@@ -102,10 +109,10 @@ export async function isActiveClubAtLocation(location: CanonicalLocation, clubId
   }));
 }
 
-export async function issueLocationToken(userId: string, location: CanonicalLocation, now = Date.now()) {
+export async function issueLocationToken(userId: string, location: CanonicalLocation, now = Date.now(), source: LocationSource = 'gps') {
   const issuedAt = Math.floor(now / 1000);
   const expiresAt = issuedAt + LOCATION_TOKEN_TTL_SECONDS;
-  const token = await new SignJWT({ purpose: 'matchmaking-location', city: location.city, state: location.state, country: location.country })
+  const token = await new SignJWT({ purpose: 'matchmaking-location', city: location.city, state: location.state, country: location.country, source })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
     .setIssuedAt(issuedAt)
@@ -122,7 +129,8 @@ export async function verifyLocationToken(token: string, userId: string, now = D
     if (typeof payload.city !== 'string' || !payload.city.trim() || typeof payload.state !== 'string' || typeof payload.country !== 'string') return null;
     const state = normalizeBrazilianState(payload.state);
     if (!state || normalizeBrazilCountry(payload.country) !== 'BR') return null;
-    return { city: payload.city.trim(), state, country: payload.country.trim(), expiresAt: new Date(payload.exp * 1000).toISOString() };
+    const source: LocationSource = payload.source === 'manual' ? 'manual' : 'gps';
+    return { city: payload.city.trim(), state, country: payload.country.trim(), expiresAt: new Date(payload.exp * 1000).toISOString(), source };
   } catch {
     return null;
   }

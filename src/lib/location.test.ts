@@ -41,8 +41,9 @@ describe('location service and proof tokens', () => {
   it('accepts only finite in-range coordinates with adequate accuracy and a recent timestamp', () => {
     const now = Date.parse('2026-10-26T12:00:00Z');
     expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 100, timestamp: now }, now).valid).toBe(true);
+    expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 5_000, timestamp: now }, now).valid).toBe(true);
     expect(validateLocationMeasurement({ latitude: 91, longitude: -51, accuracy: 20, timestamp: now }, now)).toMatchObject({ valid: false, status: 422 });
-    expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 100.1, timestamp: now }, now)).toMatchObject({ valid: false, status: 422 });
+    expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 5_001, timestamp: now }, now)).toMatchObject({ valid: false, status: 422 });
     expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 20, timestamp: now - 300_001 }, now)).toMatchObject({ valid: false, status: 422 });
     expect(validateLocationMeasurement({ latitude: -27, longitude: -51, accuracy: 20, timestamp: now + 30_001 }, now)).toMatchObject({ valid: false, status: 422 });
     expect(validateLocationMeasurement({ latitude: Number.NaN, longitude: -51, accuracy: 20, timestamp: now }, now)).toMatchObject({ valid: false, status: 400 });
@@ -63,5 +64,14 @@ describe('location service and proof tokens', () => {
     expect(payload).not.toHaveProperty('latitude');
     expect(payload).not.toHaveProperty('longitude');
     expect(payload).not.toHaveProperty('timestamp');
+  });
+
+  it('distinguishes GPS-confirmed from manually declared city tokens', async () => {
+    const now = Date.parse('2026-10-26T12:00:00Z');
+    const location = { city: 'Joaçaba', state: 'SC', country: 'Brasil' };
+    const manual = await issueLocationToken('user-1', location, now, 'manual');
+    const gps = await issueLocationToken('user-1', location, now);
+    expect(await verifyLocationToken(manual.token, 'user-1', now)).toMatchObject({ ...location, source: 'manual' });
+    expect(await verifyLocationToken(gps.token, 'user-1', now)).toMatchObject({ ...location, source: 'gps' });
   });
 });

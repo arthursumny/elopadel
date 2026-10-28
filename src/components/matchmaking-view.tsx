@@ -8,7 +8,7 @@ import { PlayerPicker } from '@/components/player-picker';
 import { Dialog } from '@/components/dialog';
 import { localDateKey, timeToMinutes, type MatchSearchPreferences } from '@/lib/matchmaking';
 import { clubIdForCity, clubsForCity } from '@/lib/matchmaking-club-filter';
-import { clubIdForBrowserLocation, clubsForBrowserLocation, isBrowserLocationProofFresh, resolveCurrentBrowserLocation, type BrowserLocationProof } from '@/lib/browser-location';
+import { clubIdForBrowserLocation, clubsForBrowserLocation, isBrowserLocationProofFresh, resolveCurrentBrowserLocation, resolveManualBrowserLocation, type BrowserLocationProof } from '@/lib/browser-location';
 import type { ActiveMatchSearch, CourtSide, MatchChallenge, MatchMode, MatchSearchInvitation, MatchmakingPlayerOption } from '@/lib/types';
 
 type Club = { id: string; name: string; city: string; state: string; country: string };
@@ -174,6 +174,30 @@ export function MatchmakingView({ clubs, players, searchInvitations: initialSear
     }
   }
 
+  async function requestManualLocation(city: string) {
+    if (locationResolveLock.current) return null;
+    locationResolveLock.current = true;
+    setLocationLoading(true);
+    setLocationError('');
+    try {
+      const resolved = await resolveManualBrowserLocation(city);
+      setRankedLocation(resolved);
+      setDraftPreferences((current) => ({
+        ...current,
+        city: resolved.city,
+        clubId: clubIdForBrowserLocation(current.clubId, resolved, clubs),
+      }));
+      return resolved;
+    } catch (error) {
+      setLocationError(error instanceof Error ? error.message : 'Não foi possível confirmar essa cidade. Tente novamente.');
+      setRankedLocation(null);
+      return null;
+    } finally {
+      locationResolveLock.current = false;
+      setLocationLoading(false);
+    }
+  }
+
   async function applySearchPreferences() {
     if (searchSubmitLock.current) return;
     const from = draftPreferences.from ? timeToMinutes(draftPreferences.from) : null;
@@ -285,7 +309,7 @@ export function MatchmakingView({ clubs, players, searchInvitations: initialSear
       {activeSearch && <section className="grid gap-4 md:grid-cols-3"><Info icon={Clock3} title="Disponibilidade em comum" text="O sistema só marca quando existe um dia e horário compatível para todos." /><Info icon={Users} title="Duplas preservadas" text="Quem entra com parceiro permanece na mesma dupla contra os adversários." /><Info icon={MapPin} title="Quadra no Gripo" text="O saguão organiza jogadores e horário; a reserva continua no clube." /></section>}
       {!activeSearch && <section className="grid gap-4 md:grid-cols-3"><Info icon={Clock3} title="Dias e horários" text="Escolha terça, quarta, quinta ou quantos dias forem possíveis para você." /><Info icon={Users} title="Solo ou dupla" text="Convide pelo @handle ou deixe o app encontrar três jogadores." /><Info icon={MapPin} title="Lado da quadra" text="Informe esquerda, direita ou tanto faz para o pareamento respeitar seu estilo." /></section>}
     </div>
-    {searchOpen && <SearchPreferencesModal clubs={clubs} cities={cities} players={players} availableDays={availableDays} value={draftPreferences} friendlyCity={friendlyCityPreference} onFriendlyCityChange={setFriendlyCityPreference} location={rankedLocation} locationError={locationError} locationLoading={locationLoading} error={searchError} loading={searchSubmitting} onChange={(patch) => setDraftPreferences((current) => ({ ...current, ...patch }))} onClearLocation={() => { setRankedLocation(null); setLocationError(''); }} onRequestLocation={requestRankedLocation} onToggleDate={toggleDate} onApply={applySearchPreferences} onReset={resetSearchPreferences} onClose={() => { setSearchOpen(false); setRankedLocation(null); }} />}
+    {searchOpen && <SearchPreferencesModal clubs={clubs} cities={cities} players={players} availableDays={availableDays} value={draftPreferences} friendlyCity={friendlyCityPreference} onFriendlyCityChange={setFriendlyCityPreference} location={rankedLocation} locationError={locationError} locationLoading={locationLoading} error={searchError} loading={searchSubmitting} onChange={(patch) => setDraftPreferences((current) => ({ ...current, ...patch }))} onClearLocation={() => { setRankedLocation(null); setLocationError(''); }} onRequestLocation={requestRankedLocation} onRequestManualLocation={requestManualLocation} onToggleDate={toggleDate} onApply={applySearchPreferences} onReset={resetSearchPreferences} onClose={() => { setSearchOpen(false); setRankedLocation(null); }} />}
     {challengeOpen && <DirectChallengeModal clubs={clubs} cities={cities} players={players} value={challengeDraft} error={challengeError} loading={challengeSubmitting} onChange={(patch) => setChallengeDraft((current) => ({ ...current, ...patch }))} onApply={applyDirectChallenge} onClose={() => setChallengeOpen(false)} />}
   </AppShell>;
 }
@@ -336,7 +360,8 @@ function SearchingCard({ search, clubs }: { search: ActiveMatchSearch; clubs: Cl
   return <section className="flex flex-col gap-4 rounded-2xl border border-lime/20 bg-lime/[.06] p-5 sm:flex-row sm:items-center"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-lime text-ink"><LocateFixed size={18} /></span><div className="flex-1"><p className="text-sm font-black text-white/90">Buscando jogadores compatíveis</p><p className="mt-1 text-xs text-white/45">{formatSearchSummary(search, clubs)} • {search.partyType === 'duo' ? 'sua dupla está preservada' : 'você entrou solo'} • lado: {sideLabel(search.sidePreference)}</p><p className="mt-2 text-[10px] text-white/30">Quando a partida for encontrada, os quatro receberão um aviso para confirmar que vão jogar.</p></div><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-lime" /></section>;
 }
 
-function SearchPreferencesModal({ clubs, cities, players, availableDays, value, friendlyCity, onFriendlyCityChange, location, locationError, locationLoading, error, loading, onChange, onClearLocation, onRequestLocation, onToggleDate, onApply, onReset, onClose }: { clubs: Club[]; cities: string[]; players: MatchmakingPlayerOption[]; availableDays: string[]; value: SearchDraft; friendlyCity: string; onFriendlyCityChange: (city: string) => void; location: BrowserLocationProof | null; locationError: string; locationLoading: boolean; error: string; loading: boolean; onChange: (patch: Partial<SearchDraft>) => void; onClearLocation: () => void; onRequestLocation: () => Promise<BrowserLocationProof | null>; onToggleDate: (date: string) => void; onApply: () => void; onReset: () => void; onClose: () => void }) {
+function SearchPreferencesModal({ clubs, cities, players, availableDays, value, friendlyCity, onFriendlyCityChange, location, locationError, locationLoading, error, loading, onChange, onClearLocation, onRequestLocation, onRequestManualLocation, onToggleDate, onApply, onReset, onClose }: { clubs: Club[]; cities: string[]; players: MatchmakingPlayerOption[]; availableDays: string[]; value: SearchDraft; friendlyCity: string; onFriendlyCityChange: (city: string) => void; location: BrowserLocationProof | null; locationError: string; locationLoading: boolean; error: string; loading: boolean; onChange: (patch: Partial<SearchDraft>) => void; onClearLocation: () => void; onRequestLocation: () => Promise<BrowserLocationProof | null>; onRequestManualLocation: (city: string) => Promise<BrowserLocationProof | null>; onToggleDate: (date: string) => void; onApply: () => void; onReset: () => void; onClose: () => void }) {
+  const [manualCityChoice, setManualCityChoice] = useState('');
   const availableClubs = value.mode === 'ranked'
     ? location ? clubsForBrowserLocation(clubs, location) : []
     : clubsForCity(clubs, value.city);
@@ -411,18 +436,26 @@ function SearchPreferencesModal({ clubs, cities, players, availableDays, value, 
 
         {value.mode === 'ranked' && <div className="space-y-3 rounded-2xl border border-cyan/15 bg-cyan/[.04] p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div><span className="block text-xs font-bold text-white/75">Cidade da sua localização atual</span><p className="mt-1 text-[11px] leading-relaxed text-white/40">A cidade da busca ranqueada é confirmada pelo GPS e não pode ser escolhida manualmente.</p></div>
+            <div><span className="block text-xs font-bold text-white/75">Cidade da sua localização atual</span><p className="mt-1 text-[11px] leading-relaxed text-white/40">A cidade da busca ranqueada é confirmada pelo GPS. Se o sinal falhar, informe a cidade abaixo.</p></div>
             <button type="button" disabled={locationLoading || loading} onClick={() => void onRequestLocation()} className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-cyan/25 bg-cyan/10 px-4 py-3 text-xs font-black text-cyan transition hover:bg-cyan/[.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/50 disabled:opacity-50">
               <Crosshair size={14} aria-hidden="true" />{locationLoading ? 'Verificando...' : location ? 'Atualizar localização' : 'Detectar minha localização'}
             </button>
           </div>
           {location && <div className="rounded-xl border border-white/[.08] bg-black/10 px-3 py-3" role="status">
             <p className="flex items-center gap-2 text-sm font-black text-white/90"><MapPin size={15} className="text-cyan" aria-hidden="true" />{location.city} — {location.state}</p>
-            <p className="mt-1 text-[10px] text-white/40">Localização confirmada para esta busca.</p>
+            <p className="mt-1 text-[10px] text-white/40">{location.source === 'manual' ? 'Cidade informada por você para esta busca.' : 'Localização confirmada para esta busca.'}</p>
             <p className="mt-2 text-[10px] text-white/35">Dados de mapa: <a href="https://www.geoapify.com" target="_blank" rel="noreferrer" className="underline decoration-white/30 underline-offset-2 hover:text-white/70">Geoapify</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="underline decoration-white/30 underline-offset-2 hover:text-white/70">© OpenStreetMap</a></p>
           </div>}
           {locationLoading && <p className="text-xs text-cyan" role="status">Buscando um sinal preciso. A localização é usada apenas para confirmar a cidade desta busca.</p>}
           {locationError && <p role="alert" className="rounded-xl border border-coral/20 bg-coral/[.06] p-3 text-xs leading-relaxed text-coral">{locationError}</p>}
+          <div className="rounded-xl border border-white/[.08] bg-white/[.02] p-3">
+            <p className="text-[10px] font-black uppercase tracking-[.12em] text-white/45">Sem sinal de GPS?</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-white/45">Escolha a cidade da sua busca. A confirmação fica marcada como cidade informada por você.</p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1"><SelectField label="Cidade" value={manualCityChoice} placeholder="Escolha a cidade" options={cities} onChange={setManualCityChoice} /></div>
+              <button type="button" disabled={!manualCityChoice || locationLoading || loading} onClick={() => void onRequestManualLocation(manualCityChoice)} className="rounded-xl border border-cyan/25 bg-cyan/10 px-4 py-3 text-xs font-black text-cyan transition hover:bg-cyan/[.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan/50 disabled:opacity-50">Usar esta cidade</button>
+            </div>
+          </div>
           <div className="rounded-xl border border-white/[.07] bg-white/[.025] p-3">
             <p className="text-[10px] font-black uppercase tracking-[.12em] text-white/45">A busca pode ampliar a faixa de rating</p>
             <p className="mt-1 text-[11px] leading-relaxed text-white/45">Começa em até 300 pontos de diferença; a faixa pode chegar a 450 após 2 min e a 600 após 5 min, sempre respeitando o limite da patente. A ampliação conforme o tempo de espera dos jogadores depende da manutenção do sistema: os prazos não são garantidos e a cidade da busca não muda.</p>

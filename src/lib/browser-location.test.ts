@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BrowserLocationError, clubsForBrowserLocation, isBrowserLocationProofFresh, resolveCurrentBrowserLocation } from './browser-location';
+import { BrowserLocationError, clubsForBrowserLocation, isBrowserLocationProofFresh, resolveCurrentBrowserLocation, resolveManualBrowserLocation } from './browser-location';
 
 function position(overrides: Partial<GeolocationCoordinates> = {}, timestamp = Date.now()) {
   return {
@@ -28,7 +28,7 @@ describe('browser matchmaking location', () => {
     expect(geo.getCurrentPosition).toHaveBeenCalledWith(expect.any(Function), expect.any(Function), {
       enableHighAccuracy: true,
       maximumAge: 0,
-      timeout: 10_000,
+      timeout: 20_000,
     });
     expect(fetcher).toHaveBeenCalledWith('/api/location/resolve', expect.objectContaining({
       method: 'POST',
@@ -42,7 +42,7 @@ describe('browser matchmaking location', () => {
     const fetcher = vi.fn();
     await expect(resolveCurrentBrowserLocation({ geolocation: geolocation(position()), fetcher, secureContext: false })).rejects.toThrow('HTTPS');
     await expect(resolveCurrentBrowserLocation({ geolocation: { getCurrentPosition: (_success, failure) => failure?.({ code: 1 } as GeolocationPositionError) }, fetcher, secureContext: true })).rejects.toThrow('permissão');
-    await expect(resolveCurrentBrowserLocation({ geolocation: geolocation(position({ accuracy: 101 })), fetcher, secureContext: true })).rejects.toThrow('imprecisa');
+    await expect(resolveCurrentBrowserLocation({ geolocation: geolocation(position({ accuracy: 5_001 })), fetcher, secureContext: true })).rejects.toThrow('imprecisa');
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -69,5 +69,22 @@ describe('browser matchmaking location', () => {
       { id: 'chapeco-sc', name: 'Arena Chapecó', city: 'Chapecó', state: 'SC' },
     ];
     expect(clubsForBrowserLocation(clubs, { city: 'Joaçaba', state: 'SC' }).map((club) => club.id)).toEqual(['joa-sc-1', 'joa-sc-2']);
+  });
+
+  it('lets the player declare the city by hand when GPS is unavailable', async () => {
+    const now = Date.now();
+    const fetcher = vi.fn().mockResolvedValue(response({ location: { city: 'Joaçaba', state: 'SC', country: 'Brasil', token: 'manual-token', expiresAt: new Date(now + 300_000).toISOString(), source: 'manual' } }));
+    const proof = await resolveManualBrowserLocation(' Joaçaba ', { fetcher, now: () => now });
+
+    expect(fetcher).toHaveBeenCalledWith('/api/location/resolve', expect.objectContaining({ method: 'POST', body: JSON.stringify({ city: 'Joaçaba' }) }));
+    expect(proof).toMatchObject({ city: 'Joaçaba', state: 'SC', token: 'manual-token', resolvedAt: now, source: 'manual' });
+    expect(isBrowserLocationProofFresh(proof, now)).toBe(true);
+  });
+
+  it('rejects an empty city choice and surfaces server rejections of unsupported cities', async () => {
+    await expect(resolveManualBrowserLocation('  ', { fetcher: vi.fn() })).rejects.toThrow('Escolha a cidade');
+    await expect(resolveManualBrowserLocation('Cidade Fantasma', {
+      fetcher: vi.fn().mockResolvedValue(response({ error: 'Não encontramos uma cidade com clubes ativos com esse nome.' }, false)),
+    })).rejects.toThrow('clubes ativos');
   });
 });

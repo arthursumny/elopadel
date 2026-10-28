@@ -12,6 +12,8 @@ export type BrowserLocationProof = {
   token: string;
   expiresAt: string;
   resolvedAt: number;
+  /** 'gps' quando a cidade veio do sinal do dispositivo; 'manual' quando o jogador informou. */
+  source?: 'gps' | 'manual';
 };
 
 export type LocationClub = { id: string; city: string; state: string };
@@ -38,8 +40,8 @@ export class BrowserLocationError extends Error {
 }
 
 const LOCATION_MAX_AGE_MS = 5 * 60_000;
-const LOCATION_MAX_ACCURACY_METERS = 100;
-const GEOLOCATION_TIMEOUT_MS = 10_000;
+const LOCATION_MAX_ACCURACY_METERS = 5_000;
+const GEOLOCATION_TIMEOUT_MS = 20_000;
 
 function browserGeolocation() {
   if (typeof navigator === 'undefined') return undefined;
@@ -94,7 +96,7 @@ export async function resolveCurrentBrowserLocation({
   if (![latitude, longitude, accuracy, timestamp].every(Number.isFinite)
     || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180
     || accuracy < 0 || accuracy > LOCATION_MAX_ACCURACY_METERS) {
-    throw new BrowserLocationError('A localização está imprecisa. Ative a localização precisa ou tente novamente em um local aberto.');
+    throw new BrowserLocationError('A localização está imprecisa. Ative a localização precisa do dispositivo ou informe sua cidade manualmente.');
   }
   if (timestamp > capturedAt + 30_000 || capturedAt - timestamp > LOCATION_MAX_AGE_MS) {
     throw new BrowserLocationError('A localização recebida está desatualizada. Tente novamente para confirmar sua posição atual.');
@@ -120,7 +122,42 @@ export async function resolveCurrentBrowserLocation({
     throw new BrowserLocationError(data.error || 'Não foi possível validar sua cidade. Confira sua conexão e tente novamente.');
   }
 
-  return { ...data.location, resolvedAt: now() };
+  return { ...data.location, resolvedAt: now(), source: data.location.source === 'manual' ? 'manual' : 'gps' };
+}
+
+/**
+ * Alternativa ao GPS: o jogador escolhe a cidade entre as que têm clubes ativos.
+ * O servidor valida a cidade e devolve um token igual ao do fluxo por GPS, marcado
+ * como `manual` para que o app deixe claro que a origem não foi o dispositivo.
+ */
+export async function resolveManualBrowserLocation(
+  city: string,
+  { fetcher = fetch, now = Date.now }: { fetcher?: typeof fetch; now?: () => number } = {},
+): Promise<BrowserLocationProof> {
+  const normalized = city.trim();
+  if (!normalized) throw new BrowserLocationError('Escolha a cidade da sua busca.');
+
+  let response: Response;
+  try {
+    response = await fetcher('/api/location/resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ city: normalized }),
+    });
+  } catch {
+    throw new BrowserLocationError('Não foi possível confirmar sua cidade. Confira sua conexão e tente novamente.');
+  }
+
+  const data = await response.json().catch(() => ({})) as {
+    location?: Omit<BrowserLocationProof, 'resolvedAt'>;
+    error?: string;
+  };
+  if (!response.ok || !data.location?.token || !data.location.city || !data.location.state || !data.location.expiresAt) {
+    throw new BrowserLocationError(data.error || 'Não foi possível confirmar essa cidade. Escolha outra ou tente novamente.');
+  }
+
+  return { ...data.location, resolvedAt: now(), source: 'manual' };
 }
 
 export function isBrowserLocationProofFresh(proof: BrowserLocationProof | null | undefined, now = Date.now()) {
