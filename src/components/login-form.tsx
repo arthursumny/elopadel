@@ -12,6 +12,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import Image from 'next/image';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Brand } from '@/components/app-shell';
 import { resolveAppRedirect } from '@/lib/auth-redirect';
@@ -589,22 +590,18 @@ export function LoginForm() {
     <main className="app-gradient min-h-screen">
       <div className="mx-auto grid min-h-screen max-w-6xl lg:grid-cols-[.9fr_1.1fr]">
         <section className="relative hidden overflow-hidden border-r border-white/[.07] px-12 py-10 lg:flex lg:flex-col">
-          <Brand />
-          <div className="relative z-10 mt-auto pb-12">
-            <p className="eyebrow">Sua carreira começa na quadra</p>
-            <h1 className="mt-5 max-w-md text-5xl font-black leading-[.98] tracking-[-.065em]">
-              Cada partida deixa uma marca.
-            </h1>
-            <p className="mt-6 max-w-sm text-sm leading-relaxed text-white/40">
-              Um sistema vivo para quem quer jogar mais, evoluir de verdade e saber exatamente onde está.
-            </p>
-            <div className="mt-10 flex gap-3">
-              <span className="rounded-xl border border-white/[.1] bg-white/[.03] px-3 py-2 text-[11px] font-bold text-white/50">MMR real</span>
-              <span className="rounded-xl border border-white/[.1] bg-white/[.03] px-3 py-2 text-[11px] font-bold text-white/50">Duplas equilibradas</span>
-              <span className="rounded-xl border border-white/[.1] bg-white/[.03] px-3 py-2 text-[11px] font-bold text-white/50">Ranking global</span>
-            </div>
+          <Image
+            src="/login-hero.jpg"
+            alt="Quadra de padel"
+            fill
+            priority
+            sizes="(min-width: 1024px) 45vw, 100vw"
+            className="object-cover object-center"
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/70 via-black/30 to-black/80" />
+          <div className="relative z-10">
+            <Brand />
           </div>
-          <div className="absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-lime/10 blur-3xl" />
         </section>
 
         <section className="flex flex-col px-5 py-8 sm:px-10 lg:justify-center lg:px-20">
