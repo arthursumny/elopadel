@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Brand } from '@/components/app-shell';
 import { resolveAppRedirect } from '@/lib/auth-redirect';
@@ -115,6 +116,12 @@ export function LoginForm() {
       setResetToken(resetTokenParam);
       setResetState('ready');
       setView('reset');
+      return;
+    }
+
+    const viewParam = params.get('view');
+    if (viewParam === 'register') {
+      setView('register');
       return;
     }
 
@@ -1194,6 +1201,15 @@ export function LoginForm() {
               <p className="flex items-start gap-2 text-[11px] leading-relaxed text-white/30">
                 <Check size={14} className="mt-0.5 shrink-0 text-lime" />
                 Ao continuar, você concorda com os termos de uso e permite que o Elo Padel use seu perfil para formar partidas equilibradas.
+              </p>
+              <p className="mt-3 flex items-center justify-center gap-3 text-[11px] text-white/35">
+                <Link href="/termos" className="underline decoration-white/15 underline-offset-4 transition hover:text-lime">
+                  Termos de uso
+                </Link>
+                <span aria-hidden="true" className="text-white/15">•</span>
+                <Link href="/privacidade" className="underline decoration-white/15 underline-offset-4 transition hover:text-lime">
+                  Política de Privacidade
+                </Link>
               </p>
             </div>
           </div>
