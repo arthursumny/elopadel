@@ -50,7 +50,7 @@ describe('deploy environment contract', () => {
     expect(composeServiceEnv('RESEND_API_KEY')).toBe('${RESEND_API_KEY:-}');
     expect(composeServiceEnv('EMAIL_FROM')).toBe('${EMAIL_FROM:-}');
     expect(envExample).toMatch(/^RESEND_API_KEY=$/m);
-    expect(envExample).toMatch(/^EMAIL_FROM=Elo Padel <noreply@elopadel\.avaliacoes\.tech>$/m);
+    expect(envExample).toMatch(/^EMAIL_FROM=Elo Padel <noreply@exemplo\.com>$/m);
   });
 
   it('exposes the runtime Google client id', () => {

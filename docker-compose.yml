@@ -16,7 +16,7 @@ services:
       # são apenas aliases legados de transição para deploys antigos.
       ADMIN_KEY: ${ADMIN_KEY:-${ADMIN_API_KEY:-}}
       MAINTENANCE_TOKEN: ${MAINTENANCE_TOKEN:-${MAINTENANCE_API_KEY:-}}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://elopadel.avaliacoes.tech}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://app.exemplo.com}
       # Runtime do servidor: /api/auth/config entrega este ID ao cliente web.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       ALLOW_MOCK_AUTH: ${ALLOW_MOCK_AUTH:-false}

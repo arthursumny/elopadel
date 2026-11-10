@@ -20,3 +20,14 @@ mobile/.env
 mobile/.env.*
 !mobile/.env.example
 
+# Documentos internos
+AGENTS.md
+CLAUDE.md
+docs/OPERATIONS.md
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+.claude/
+
+

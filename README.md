@@ -1,53 +1,179 @@
 # Elo Padel
 
-Camada competitiva contínua para jogadores de padel: partidas equilibradas, MMR, patentes, temporadas e ranking geográfico.
+Plataforma de competição contínua de padel projetada para conectar jogadores, clubes e ligas com partidas equilibradas, evolução de patentes e rankings dinâmicos.
 
-## Rodar localmente
+O sistema combina uma experiência web completa com um aplicativo mobile nativo, integrando desde a busca de parceiros e adversários até a validação coletiva de resultados e a evolução de rating em temporadas competitivas.
 
-Requisitos: Node.js 22+ e npm.
+---
 
+## Recursos Principais
+
+- **Matchmaking por Proximidade e GPS**: Busca inteligente de partidas baseada na localização geográfica do jogador, preferências de lados da quadra (drive/revés), disponibilidade de horário e compatibilidade de nível técnico.
+- **Rating Estilo MMR com Bandas Progressivas**: Sistema de avaliação de habilidade baseado em MMR (Matchmaking Rating) com divisões, categorias e patentes, calibrado para equilibrar partidas solo ou em duplas formadas.
+- **Temporadas e Pontos**: Divisão do ano esportivo em temporadas competitivas, acúmulo de pontos por vitórias e partidas disputadas, e tabelas de liderança (leaderboards) regionais.
+- **Clubes e Quadras**: Cadastro de clubes parceiros, gestão de quadras e possibilidade de solicitação de filiação de atletas aos seus clubes locais.
+- **Reservas Sincronizadas com Gripo**: Integração com a API do Gripo para checagem de disponibilidade de quadras em tempo real e redirecionamento contínuo para reserva.
+- **Validação de Resultados e Presença**: Ciclo completo pós-jogo com confirmação de presença (check-in), envio de placar e votação mútua entre as duas duplas para validação transparente do resultado antes do cálculo de pontuação.
+- **Painéis Especializados**:
+  - **Jogador**: Perfil, histórico de partidas, estatísticas de temporada, lista de amigos, lobby de busca e desafios diretos.
+  - **Clube**: Gestão de membros, consulta de partidas realizadas no local e resolução de eventuais contestações.
+  - **Administrador**: Gestão de temporadas, clubes, parâmetros globais e monitoramento da plataforma.
+- **Multiplataforma**: Aplicação web responsiva e aplicativo mobile nativo (iOS e Android).
+
+---
+
+## Tecnologias e Arquitetura
+
+O projeto foi construído com as seguintes tecnologias:
+
+### Web & Backend
+- **Next.js 16 (App Router)**: Framework full-stack para renderização web e rotas de API.
+- **React 19**: Biblioteca para interfaces declarativas e componentes de servidor.
+- **Tailwind CSS**: Estilização baseada em classes utilitárias.
+- **PostgreSQL**: Banco de dados relacional.
+- **Drizzle ORM**: Modelagem de dados, schemas declarativos e geração de migrações tipadas.
+- **postgres (melhor-sql/porsager)**: Driver SQL de alta performance para conexões com o PostgreSQL.
+- **Resend**: Envio de e-mails transacionais (verificação de conta, redefinição de senha e notificações).
+- **Zod**: Validação de schemas e payloads nas rotas de API.
+- **Jose**: Assinatura e verificação segura de JSON Web Tokens (JWT) para autenticação.
+
+### Mobile
+- **React Native & Expo**: Desenvolvimento do aplicativo móvel cross-platform para Android e iOS.
+- **NativeWind (Tailwind CSS)**: Estilização consistente e reativa no app móvel.
+- **Expo Router**: Roteamento baseado em arquivos para mobile.
+- **Expo Location & Push Notifications**: Serviços nativos de geolocalização e notificações push.
+
+### Testes & Qualidade
+- **Vitest & Vitest Browser**: Framework para execução de testes rápidos de unidade, rotas de API e integração de matchmaking.
+- **TypeScript 5**: Tipagem estática rigorosa em todo o repositório.
+
+---
+
+## Estrutura do Projeto
+
+```
+elo-padel/
+├── src/
+│   ├── app/                 # Rotas do Next.js App Router (páginas web, APIs e painéis)
+│   │   ├── (auth)/          # Telas de login, cadastro e onboarding web
+│   │   ├── admin/           # Painel administrativo
+│   │   ├── club/            # Painel do gestor de clube
+│   │   ├── api/             # Endpoints REST (auth, matchmaking, partidas, clubes, etc.)
+│   │   └── ...              # Telas do jogador (lobby, partidas, perfil, ranking)
+│   ├── components/          # Componentes React reutilizáveis da interface web
+│   └── lib/                 # Núcleo de regras de negócio e infraestrutura
+│       ├── db/              # Conexão PostgreSQL, instâncias Drizzle e schemas de tabelas
+│       ├── domain/          # Lógica de domínio (MMR, cálculo de pontuação, partidas)
+│       ├── integrations/    # Integrações externas (Gripo, Resend, provedores de geolocalização)
+│       └── security/        # Hashing de senhas, controle de sessões e rate-limiting
+├── mobile/                  # Aplicação mobile React Native com Expo
+│   ├── app/                 # Rotas de navegação do Expo Router
+│   ├── src/                 # Contextos de autenticação, hooks e componentes do app
+│   └── eas.json             # Configuração de builds com Expo Application Services
+├── drizzle/                 # Migrações SQL versionadas geradas pelo Drizzle Kit
+├── scripts/                 # Scripts utilitários de desenvolvimento, seed e automações
+│   ├── local-seed-test-players.ts # Criação de jogadores e temporada de teste para dev
+│   ├── local-e2e-match.mjs        # Simulação local de fluxo E2E de partida
+│   ├── sync-gripo-clubs.ts        # Script de sincronização de clubes via Gripo
+│   └── backup-db.sh               # Utilitário de backup do banco de dados
+├── tests/                   # Testes automatizados de API, integração e adversariais
+├── docker-compose.yml       # Orquestração do banco de dados PostgreSQL e serviço web
+└── package.json             # Dependências e scripts da aplicação web
+```
+
+---
+
+## Como Rodar Localmente
+
+### Pré-requisitos
+- **Node.js**: Versão 22 ou superior recomendada.
+- **npm**: Versão 10+.
+- **Docker e Docker Compose**: Para execução do banco de dados PostgreSQL local.
+
+---
+
+### Passo a Passo
+
+#### 1. Clonar o repositório e instalar dependências
 ```bash
-npm install
+git clone <url-do-repositorio>
+cd elo-padel
+npm ci
+```
+
+#### 2. Configurar as variáveis de ambiente
+Copie o arquivo de exemplo para criar seu `.env`:
+```bash
 cp .env.example .env
+```
+Edite o arquivo `.env` para ajustar os valores conforme necessário (por padrão, as configurações já apontam para o PostgreSQL local configurado no Docker Compose).
+
+#### 3. Subir o banco de dados PostgreSQL
+Inicie o contêiner do PostgreSQL via Docker Compose:
+```bash
 docker compose up -d db
-npm run db:push
+```
+
+#### 4. Executar as migrações do banco de dados
+Aplique as migrações existentes no banco de dados recém-criado:
+```bash
+npx drizzle-kit migrate
+```
+*(Ou utilize o atalho: `npm run db:migrate`)*
+
+#### 5. Popular o banco com dados de teste (Opcional)
+Para criar rapidamente 4 jogadores de teste (`@teste1`, `@teste2`, `@teste3`, `@teste4`) com senhas prontas (`elopadel123`) e uma temporada ativa:
+```bash
+npx tsx scripts/local-seed-test-players.ts
+```
+
+#### 6. Iniciar a aplicação web em modo de desenvolvimento
+```bash
 npm run dev
 ```
+Acesse a aplicação no seu navegador em `http://localhost:3000`.
 
-Abra `http://localhost:3000`. O banco começa vazio: não existe jogador, clube, sala ou temporada demonstrativa. O administrador entra em `/admin/login` com a chave configurada em `ADMIN_KEY`, cadastra os clubes e define o e-mail/senha de acesso de cada clube em `/club/login`. Jogadores criam as próprias contas em `/login` com e-mail e senha; o formulário de cadastro pede uma senha inicial, mas a conta fica pendente até a confirmação do e-mail. Ao abrir o link, o jogador define a **senha definitiva**, que substitui a inicial; somente depois disso o login é liberado. Também é possível entrar com Google quando `GOOGLE_CLIENT_ID` estiver configurado. Em uma conta nova, o jogador informa nome, escolhe seu @handle, cidade, UF e sua categoria inicial. A conta começa na divisão II da categoria escolhida, com 50 pontos e patente provisória.
+---
 
-O cadastro por e-mail exige `EMAIL_PROVIDER_URL` e `EMAIL_PROVIDER_TOKEN` apontando para um provedor compatível com o contrato descrito em [`docs/OPERATIONS.md`](docs/OPERATIONS.md#e-mail-transacional). Sem esse adaptador, o cadastro responde 503 em vez de fingir que enviou a mensagem. Login por celular/OTP e login com Apple foram desativados; as rotas de OTP respondem 410, tokens Apple são rejeitados e as contas existentes não foram apagadas. A troca de ticket de sessão também está desativada (410). No fallback de Google em navegador no mobile, o retorno ao app usa somente deep link, sem troca de ticket.
+### Executando o Aplicativo Mobile (Opcional)
 
-## PostgreSQL
+Para rodar o aplicativo mobile:
+1. Acesse a pasta `mobile/`:
+   ```bash
+   cd mobile
+   npm install
+   ```
+2. Inicie o Expo:
+   ```bash
+   npm run start
+   ```
+3. Use o aplicativo **Expo Go** no seu smartphone ou um emulador (Android Studio / simulador iOS) para ler o QR Code e interagir com o app.
 
-Com Docker:
+---
+
+## Testes e Qualidade de Código
+
+### Testes Automatizados (Vitest)
+O repositório possui uma ampla suíte de testes unitários, testes de rotas de API e testes de integração de matchmaking com Vitest:
 
 ```bash
-docker compose up -d db
-npm run db:push
+# Executa todos os testes
+npm test
+
+# Executa testes em modo interativo/watch
+npx vitest
 ```
 
-Defina `DATABASE_URL` no `.env`. O schema está em `src/lib/db/schema.ts`; o modo recomendado é executar com PostgreSQL. `npm run db:seed` não cria dados fictícios: ele apenas confirma que o banco será mantido vazio.
+### Checagem de Tipos (TypeScript)
+Para validar todos os tipos estáticos do projeto sem gerar arquivos de build:
 
-O fluxo real de competição é: jogador se cadastra por e-mail e senha, confirma o e-mail definindo a senha definitiva → recebe um @handle público → pode buscar jogadores por nome/@handle e construir sua lista de amigos → solicita vínculo com clube → abre o saguão de busca e informa se entra solo ou convida um parceiro, os dias, a janela de horário, a cidade, o clube e o lado da quadra → em uma dupla, os dois aceitam buscar → o app combina quatro jogadores com ranking, lados e disponibilidade compatíveis → os quatro aceitam a partida formada → no horário, os quatro confirmam presença → depois da duração configurada, um informa o placar → cada jogador vota no vencedor → pelo menos três votos iguais, com um de cada dupla, validam o resultado. Para um desafio direto, o criador escolhe as duas duplas, propõe um horário e os outros três jogadores aceitam ou sugerem outro; quando todos aceitam, o desafio gera uma partida comum e segue exatamente o mesmo ciclo de presença, resultado, punição e MMR. Desafios ranqueados contra a mesma dupla ficam limitados a duas ocorrências em 14 dias. Qualquer divergência, como 2×2, bloqueia MMR e patente e envia a partida para análise do clube. Se o clube confirmar um no-show, o jogador recebe perda escalonada de MMR/pontos e suspensão ranqueada. Telefones permanecem privados e não são usados como identificador social.
+```bash
+npx tsc --noEmit
+```
+*(Ou utilize o atalho: `npm run typecheck`)*
 
-## Scripts
+---
 
-- `npm run dev` — desenvolvimento.
-- `npm run build` — build de produção standalone.
-- `npm run start` — inicia o bundle standalone depois do build.
-- `npm run typecheck` — checagem TypeScript.
-- `npm test` — testes unitários do domínio.
-- `npm run db:generate` — gerar migration Drizzle.
-- `npm run db:migrate` — executar migrations.
-- `npm run db:seed` — confirmar que o banco será mantido vazio.
-- `npm run db:backup` — gerar um dump PostgreSQL no diretório definido por `BACKUP_DIR`.
-- `npm run maintenance` — executar a manutenção automática com `APP_URL` e `MAINTENANCE_TOKEN`.
+## Licença
 
-## Operação em produção
-
-O checklist de deploy no Dokploy, migração, healthcheck, backup, configuração de Google/e-mail e cadastro do primeiro clube está em [`docs/OPERATIONS.md`](docs/OPERATIONS.md). As migrations `0014_email_auth` e `0015_player_session_versions` são aditivas. A `0015` versiona sessões de jogador: em produção, JWTs antigos sem o claim `sv` deixam de valer e o jogador precisa entrar novamente. O reset de senha também revoga as sessões anteriores. Clubes e administradores não usam esse claim. No deploy por Compose, use `elo_padel_db` como host do banco: somente o serviço web participa da rede compartilhada do Dokploy e o PostgreSQL fica na rede privada do projeto.
-
-## Escopo
-
-O Elo Padel não implementa reservas, pagamentos, disponibilidade de quadras ou torneios. O Gripo continua responsável por esses fluxos; o app armazena o clube/horário da partida e direciona o jogador para o link configurado do Gripo.
+Distribuído sob a licença MIT. Consulte o arquivo [LICENSE](LICENSE) para obter mais informações.

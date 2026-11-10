@@ -388,7 +388,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Browser fallback for Expo Go. The only credential path is the
             // deep-link callback from the web login page; no ticket exchange.
             const redirectUrl = Linking.createURL('auth-callback');
-            const baseUrl = process.env.EXPO_PUBLIC_API_URL || 'https://elopadel.avaliacoes.tech';
+            const baseUrl = process.env.EXPO_PUBLIC_API_URL || 'https://app.exemplo.com';
             const authUrl = `${baseUrl}/login?mobile=1&redirect_uri=${encodeURIComponent(redirectUrl)}`;
 
             try {

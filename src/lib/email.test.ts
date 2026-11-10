@@ -15,7 +15,7 @@ describe('email provider configuration and delivery', () => {
 
   it('uses Resend with its native payload, including HTML', async () => {
     vi.stubEnv('RESEND_API_KEY', 'resend-secret');
-    vi.stubEnv('EMAIL_FROM', 'Elo Padel <noreply@elopadel.avaliacoes.tech>');
+    vi.stubEnv('EMAIL_FROM', 'Elo Padel <noreply@exemplo.com>');
     vi.stubEnv('EMAIL_PROVIDER_URL', 'https://mail.provider.test/send');
     vi.stubEnv('EMAIL_PROVIDER_TOKEN', 'legacy-secret');
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
@@ -26,7 +26,7 @@ describe('email provider configuration and delivery', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://api.resend.com/emails', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ Authorization: 'Bearer resend-secret' }),
-      body: JSON.stringify({ from: 'Elo Padel <noreply@elopadel.avaliacoes.tech>', to: ['player@example.com'], subject: 'Verify', text: 'Plain', html: '<b>HTML</b>' }),
+      body: JSON.stringify({ from: 'Elo Padel <noreply@exemplo.com>', to: ['player@example.com'], subject: 'Verify', text: 'Plain', html: '<b>HTML</b>' }),
     }));
   });
 
