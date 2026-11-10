@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -44,9 +45,7 @@ function isNavItemActive(pathname: string, href: string) {
 export function Brand({ compact = false, href = '/' }: { compact?: boolean; href?: string }) {
   return (
     <Link href={href} className={cn('flex items-center gap-3', compact && 'justify-center')}>
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-lime text-ink shadow-[0_0_30px_rgba(201,255,74,.18)]">
-        <span className="text-lg font-black">E</span>
-      </span>
+      <Image src="/brand/logo-mark.png" alt="Elo Padel" width={36} height={36} className="h-9 w-9 object-contain" priority />
       {!compact && <span className="text-[15px] font-black tracking-tight">ELO <span className="font-normal text-white/60">PADEL</span></span>}
     </Link>
   );

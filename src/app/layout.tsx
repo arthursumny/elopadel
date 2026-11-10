@@ -10,6 +10,15 @@ export const metadata: Metadata = {
   description: 'Partidas equilibradas, ranking contínuo e evolução competitiva para jogadores de padel.',
   applicationName: 'Elo Padel',
   manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [{ url: '/brand/favicon-32.png', sizes: '32x32', type: 'image/png' }],
+    apple: [{ url: '/brand/apple-icon.png', sizes: '180x180' }],
+  },
+  openGraph: {
+    title: 'Elo Padel',
+    description: 'Partidas equilibradas, ranking contínuo e evolução competitiva para jogadores de padel.',
+    images: ['/brand/logo-512.png'],
+  },
 };
 
 export const viewport: Viewport = {
