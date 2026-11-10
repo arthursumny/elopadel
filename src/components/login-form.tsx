@@ -598,9 +598,18 @@ export function LoginForm() {
             sizes="(min-width: 1024px) 45vw, 100vw"
             className="object-cover object-center"
           />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/70 via-black/30 to-black/80" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/70 via-black/35 to-black/90" />
           <div className="relative z-10">
             <Brand />
+          </div>
+          <div className="relative z-10 mt-auto max-w-md">
+            <p className="eyebrow">Competitividade em outro nível</p>
+            <h1 className="mt-3 text-4xl font-black leading-[.98] tracking-[-.06em] text-white xl:text-5xl">
+              Jogue no seu nível. Suba no ranking.
+            </h1>
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/50">
+              Partidas equilibradas por nível real e um ranking que só sobe com vitória.
+            </p>
           </div>
         </section>
 
