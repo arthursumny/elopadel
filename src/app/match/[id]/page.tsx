@@ -84,6 +84,9 @@ function MatchView({ id }: { id: string }) {
     const match = data.match as MatchDetails;
     const current = match.participants.find((participant) => participant.isCurrentPlayer);
     setDetails(match);
+    if (match.bookedCourtName) {
+      setBookedCourt(match.bookedCourtName);
+    }
     setSubmitted(['result-pending', 'validated', 'disputed'].includes(match.status));
     setResultConfirmed(current?.confirmation === 'confirmed' || match.status === 'validated');
     setDisputed(current?.confirmation === 'disputed' || match.status === 'disputed');
@@ -327,17 +330,71 @@ function MatchView({ id }: { id: string }) {
           <div className="mt-8 grid gap-3 border-t border-white/[.07] pt-5 sm:grid-cols-3">
             <Meta icon={Clock3} label="Horário" value={startsAt.toLocaleDateString('pt-BR') + ' ' + startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} />
             <Meta icon={Users} label="Aceite da partida" value={details.acceptedCount + ' de 4 confirmaram'} />
-            <Meta icon={ShieldCheck} label="Quadra" value={bookedCourt ? `Quadra: ${bookedCourt}` : 'Reservar no Gripo'} />
+            <Meta icon={ShieldCheck} label="Quadra" value={details.bookedCourtName || bookedCourt ? `Quadra: ${details.bookedCourtName || bookedCourt}` : 'Reservar no Gripo'} />
           </div>
-          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            <button
-              onClick={autoBookCourt}
-              disabled={bookingLoading || Boolean(bookedCourt)}
-              aria-busy={bookingLoading}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-lime/30 bg-lime/10 py-3 text-[11px] font-bold text-lime hover:bg-lime/20 disabled:opacity-50"
+
+          {/* Cartão destacado quando a quadra está reservada */}
+          {details.bookingStatus === 'booked' && (
+            <div className="mt-5 rounded-2xl border border-lime/30 bg-lime/[.07] p-4 text-white">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="text-lime" size={18} />
+                <span className="text-xs font-bold uppercase tracking-wider text-lime">Quadra reservada</span>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-bold text-white">
+                <span>{details.bookedCourtName || bookedCourt || 'Quadra confirmada'}</span>
+                <span className="text-white/30">•</span>
+                <span className="text-xs font-semibold text-white/70">
+                  {startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+                {typeof details.bookingPriceCents === 'number' && (
+                  <>
+                    <span className="text-white/30">•</span>
+                    <span className="text-xs font-semibold text-lime">
+                      {`R$ ${(details.bookingPriceCents / 100).toFixed(2).replace('.', ',')}`}
+                    </span>
+                  </>
+                )}
+              </div>
+              {details.bookingMessage && (
+                <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-white/80">
+                  {details.bookingMessage}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Mensagem quando reserva automática foi ignorada ou falhou */}
+          {(details.bookingStatus === 'failed' || details.bookingStatus === 'skipped') && details.bookingMessage && (
+            <div
+              className={`mt-5 rounded-xl border p-3.5 text-xs leading-relaxed ${
+                details.bookingStatus === 'failed'
+                  ? 'border-coral/30 bg-coral/[.08] text-coral/90'
+                  : 'border-amber-300/30 bg-amber-300/[.08] text-amber-200/90'
+              }`}
             >
-              {bookingLoading ? 'Reservando...' : bookedCourt ? `✓ Quadra ${bookedCourt} Reservada` : '⚡ Reservar Quadra Automaticamente (Gripo)'}
-            </button>
+              <div className="flex items-center gap-2 font-bold">
+                <CircleAlert size={15} />
+                <span>
+                  {details.bookingStatus === 'failed'
+                    ? 'Falha na reserva automática'
+                    : 'Reserva automática ignorada'}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-white/70">{details.bookingMessage}</p>
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+            {details.bookingStatus !== 'booked' && !bookedCourt && (
+              <button
+                onClick={autoBookCourt}
+                disabled={bookingLoading}
+                aria-busy={bookingLoading}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-lime/30 bg-lime/10 py-3 text-[11px] font-bold text-lime hover:bg-lime/20 disabled:opacity-50"
+              >
+                {bookingLoading ? 'Reservando...' : '⚡ Reservar Quadra (Gripo)'}
+              </button>
+            )}
             <a
               href={details.gripoUrl}
               target="_blank"

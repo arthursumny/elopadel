@@ -8,6 +8,7 @@ import { getMatchEnd, getMatchDurationMinutes, getResultDeadline } from '@/lib/m
 import type { MatchMode } from '@/lib/types';
 import { db } from './index';
 import { notifyMatchParticipants, notifyUsers } from './notifications';
+import { autoBookMatchCourt } from '@/lib/booking/auto-book';
 import { auditLogs, matchParticipants, matchRooms, matchSearches, matches, ratingEvents, ratings, rankStates, roomInvitations, roomParticipants, seasonStats, seasons, users } from './schema';
 
 async function loadCompetitivePlayers(userIds: string[]) {
@@ -144,6 +145,11 @@ export async function decideMatchAcceptance(matchId: string, userId: string, dec
     await notifyUsers(userIds, { type: 'match-cancelled', title: 'Partida cancelada', body: 'Um dos jogadores não confirmou a partida. Todos podem iniciar uma nova busca.', href: '/matchmaking', dedupeKey: `match-cancelled:${matchId}` });
   } else if (result.status === 'confirmed') {
     await notifyUsers(userIds, { type: 'match-confirmed', title: 'Partida confirmada pelos quatro', body: 'Todos aceitaram jogar. No horário marcado, os quatro precisam confirmar presença na quadra.', href: `/match/${matchId}`, dedupeKey: `match-confirmed:${matchId}` });
+    try {
+      await autoBookMatchCourt(matchId);
+    } catch (bookingError) {
+      console.error('[decideMatchAcceptance] Erro na reserva automática:', bookingError);
+    }
   }
   return result;
 }

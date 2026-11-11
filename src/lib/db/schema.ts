@@ -105,9 +105,13 @@ export const clubs = pgTable('clubs', {
   country: text('country').notNull(),
   address: text('address'),
   gripoUrl: text('gripo_url'),
+  gripoClubId: integer('gripo_club_id'),
   isActive: boolean('is_active').notNull().default(true),
   ...timestamps,
-}, (table) => ({ clubLocationUnique: uniqueIndex('club_name_location_unique').on(table.name, table.city, table.state, table.country) }));
+}, (table) => ({
+  clubLocationUnique: uniqueIndex('club_name_location_unique').on(table.name, table.city, table.state, table.country),
+  clubGripoIdUnique: uniqueIndex('club_gripo_id_unique').on(table.gripoClubId),
+}));
 
 export const clubAccounts = pgTable('club_accounts', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -266,6 +270,12 @@ export const matches = pgTable('matches', {
   sets: jsonb('sets').$type<Array<{ a: number; b: number }>>(),
   resultSubmittedBy: uuid('result_submitted_by').references(() => users.id),
   validatedAt: timestamp('validated_at', { withTimezone: true }),
+  bookingStatus: text('booking_status'),
+  bookedCourtName: text('booked_court_name'),
+  gripoScheduleId: integer('gripo_schedule_id'),
+  bookingMessage: text('booking_message'),
+  bookedAt: timestamp('booked_at', { withTimezone: true }),
+  bookingPriceCents: integer('booking_price_cents'),
   ...timestamps,
 }, (table) => ({ matchRoomUnique: uniqueIndex('match_room_unique').on(table.roomId) }));
 

@@ -247,6 +247,243 @@ function normalizeTime(timeStr: string): string {
 }
 
 /**
+ * Helper to normalize time strings to HH:MM format
+ */
+export function normalizeToHHMM(timeStr: string): string {
+  const parts = timeStr.trim().split(':');
+  const h = (parts[0] || '0').padStart(2, '0');
+  const m = (parts[1] || '0').padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+export function parseTimeToMinutes(timeStr: string): number {
+  const [h = '0', m = '0'] = timeStr.trim().split(':');
+  return Number(h) * 60 + Number(m);
+}
+
+export function minutesToTimeString(minutes: number): string {
+  const normMinutes = ((minutes % 1440) + 1440) % 1440;
+  const h = Math.floor(normMinutes / 60);
+  const m = normMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+export function calculateSlotDurationMinutes(startHour: string, endHour: string): number {
+  const startMins = parseTimeToMinutes(startHour);
+  const endMins = parseTimeToMinutes(endHour);
+  const diff = endMins - startMins;
+  return diff > 0 ? diff : diff + 1440;
+}
+
+export function getCourtQualityScore(court: GripoCourt): number {
+  const norm = (str?: string) =>
+    (str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const name = norm(court.name);
+  const type = norm(court.type);
+  const tagsStr = (court.tags || []).map(norm).join(' ');
+
+  const sandKeywords = ['beach', 'areia', 'futevolei', 'volei', 'sand'];
+  const isSand = sandKeywords.some(
+    (k) => name.includes(k) || type.includes(k) || tagsStr.includes(k)
+  );
+
+  if (isSand) {
+    return -1000;
+  }
+
+  let score = 0;
+  const isGlass =
+    type === 'vidro' ||
+    type === 'glass' ||
+    type.includes('vidro') ||
+    type.includes('glass');
+  const hasPadel = name.includes('padel');
+
+  if (isGlass) score += 100;
+  if (hasPadel) score += 100;
+
+  return score;
+}
+
+export interface BestSlotResult {
+  courtId: number;
+  courtName: string;
+  startHour: string;
+  endHour: string;
+  totalPriceCents: number | null;
+  slotIds: string[];
+}
+
+/**
+ * Pure function to select the best slot matching duration and court preferences.
+ */
+export function selectBestSlot(
+  availability: GripoAvailabilityResponse,
+  params: {
+    startTime: string;
+    durationMinutes: number;
+    sport?: string;
+  }
+): BestSlotResult | null {
+  const requestedStartHHMM = normalizeToHHMM(params.startTime);
+  const requestedStartMins = parseTimeToMinutes(requestedStartHHMM);
+  const duration = params.durationMinutes;
+
+  if (duration <= 0 || !availability?.courts?.length) {
+    return null;
+  }
+
+  const offsets = [0, 30, 60, 90, 120];
+
+  interface Candidate {
+    courtId: number;
+    courtName: string;
+    startHour: string;
+    endHour: string;
+    totalPriceCents: number | null;
+    slotIds: string[];
+    courtScore: number;
+    offsetMinutes: number;
+  }
+
+  const candidates: Candidate[] = [];
+
+  for (const court of availability.courts) {
+    const courtScore = getCourtQualityScore(court);
+
+    // Filter slots by availability and sport
+    const validSlots = (court.hours || []).filter((s) => {
+      if (!s.available || !s.availableToSchedule) return false;
+      if (params.sport && s.sport) {
+        if (s.sport.trim().toLowerCase() !== params.sport.trim().toLowerCase()) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    for (const offset of offsets) {
+      const candidateStartMins = requestedStartMins + offset;
+      const targetEndMins = candidateStartMins + duration;
+      let cursorMins = candidateStartMins;
+      let cursorStr = minutesToTimeString(cursorMins);
+      const matchedSlots: GripoSlot[] = [];
+
+      while (cursorMins < targetEndMins) {
+        const nextSlot = validSlots.find(
+          (s) => normalizeToHHMM(s.startHour) === cursorStr
+        );
+
+        if (!nextSlot) {
+          break; // Contiguity broken
+        }
+
+        matchedSlots.push(nextSlot);
+        const slotDur = calculateSlotDurationMinutes(nextSlot.startHour, nextSlot.endHour);
+        if (slotDur <= 0) {
+          break;
+        }
+
+        cursorMins += slotDur;
+        cursorStr = normalizeToHHMM(nextSlot.endHour);
+      }
+
+      if (cursorMins >= targetEndMins && matchedSlots.length > 0) {
+        let hasPrice = false;
+        let totalPrice = 0;
+        for (const s of matchedSlots) {
+          if (typeof s.priceInCents === 'number') {
+            hasPrice = true;
+            totalPrice += s.priceInCents;
+          }
+        }
+
+        const slotIds = matchedSlots.map((s) =>
+          s.hash || String((s as unknown as { id?: string | number }).id ?? s.scheduleGridId ?? '')
+        );
+
+        candidates.push({
+          courtId: court.id,
+          courtName: court.name,
+          startHour: normalizeToHHMM(matchedSlots[0].startHour),
+          endHour: normalizeToHHMM(matchedSlots[matchedSlots.length - 1].endHour),
+          totalPriceCents: hasPrice ? totalPrice : null,
+          slotIds,
+          courtScore,
+          offsetMinutes: offset,
+        });
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // Score sorting:
+  // 1. preferir quadras 'de padel de verdade' (courtScore maior)
+  // 2. depois preferir o início mais próximo do horário pedido (offsetMinutes menor)
+  // 3. em empate, preferir o menor preço total
+  candidates.sort((a, b) => {
+    if (b.courtScore !== a.courtScore) {
+      return b.courtScore - a.courtScore;
+    }
+    if (a.offsetMinutes !== b.offsetMinutes) {
+      return a.offsetMinutes - b.offsetMinutes;
+    }
+    if (a.totalPriceCents !== null && b.totalPriceCents !== null) {
+      if (a.totalPriceCents !== b.totalPriceCents) {
+        return a.totalPriceCents - b.totalPriceCents;
+      }
+    } else if (a.totalPriceCents !== null) {
+      return -1;
+    } else if (b.totalPriceCents !== null) {
+      return 1;
+    }
+    return a.courtId - b.courtId;
+  });
+
+  const best = candidates[0];
+  return {
+    courtId: best.courtId,
+    courtName: best.courtName,
+    startHour: best.startHour,
+    endHour: best.endHour,
+    totalPriceCents: best.totalPriceCents,
+    slotIds: best.slotIds,
+  };
+}
+
+/**
+ * Find the best court slot for a match from Gripo availability.
+ */
+export async function findBestSlotForMatch(params: {
+  clubId: number;
+  date: string;
+  startTime: string;
+  durationMinutes: number;
+  sport?: string;
+}): Promise<{
+  courtId: number;
+  courtName: string;
+  startHour: string;
+  endHour: string;
+  totalPriceCents: number | null;
+  slotIds: string[];
+} | null> {
+  const availability = await fetchGripoAvailability(params.clubId, params.date);
+  return selectBestSlot(availability, {
+    startTime: params.startTime,
+    durationMinutes: params.durationMinutes,
+    sport: params.sport,
+  });
+}
+
+/**
  * Find an available slot closest to the requested hour
  */
 export async function findMatchingGripoSlot(
@@ -373,7 +610,10 @@ export async function confirmGripoBooking(
 }
 
 /**
- * Resolve Gripo club numeric ID from URL, slug or stored club properties
+ * Resolve Gripo club numeric ID from URL, slug or stored club properties.
+ *
+ * NOTA: Esta função atua apenas como fallback heurístico. O caminho preferencial
+ * passa a ser a coluna `clubs.gripoClubId` vinda do sync com a API do Gripo.
  */
 export function resolveGripoClubId(gripoUrlOrName?: string | null): number | null {
   if (!gripoUrlOrName) return null;
@@ -396,4 +636,22 @@ export function resolveGripoClubId(gripoUrlOrName?: string | null): number | nul
   }
 
   return null;
+}
+
+/**
+ * Resolve o ID numérico do clube no Gripo a partir dos dados do registro.
+ * Retorna preferencialmente o `gripoClubId` numérico persistido; quando ausente,
+ * utiliza como fallback a heurística baseada em `gripoUrl`.
+ */
+export function resolveGripoClubIdFromRecord(club?: {
+  gripoClubId?: number | null;
+  gripoUrl?: string | null;
+} | null): number | null {
+  if (!club) return null;
+
+  if (typeof club.gripoClubId === 'number' && !Number.isNaN(club.gripoClubId) && club.gripoClubId > 0) {
+    return club.gripoClubId;
+  }
+
+  return resolveGripoClubId(club.gripoUrl);
 }

@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
+import { eq } from 'drizzle-orm';
 import { currentUserId } from '@/lib/auth';
+import { db } from '@/lib/db';
+import { matches, matchRooms } from '@/lib/db/schema';
 import { loadMatchDetails } from '@/lib/db/queries';
+import {
+  calculateSlotDuration,
+  createBrasiliaDate,
+  formatBrasiliaDateParts,
+} from '@/lib/booking/auto-book';
 import {
   confirmGripoBooking,
   findMatchingGripoSlot,
-  resolveGripoClubId,
+  resolveGripoClubIdFromRecord,
 } from '@/lib/integrations/gripo';
 
 export async function POST(
@@ -34,7 +42,25 @@ export async function POST(
     );
   }
 
-  const clubId = resolveGripoClubId(match.gripoUrl || match.club);
+  // Recusar (409) se bookingStatus já for 'booked'
+  if (match.bookingStatus === 'booked') {
+    return NextResponse.json(
+      {
+        error: 'A quadra para esta partida já está reservada.',
+        bookingStatus: 'booked',
+        bookedCourtName: match.bookedCourtName,
+        bookingMessage: match.bookingMessage,
+        bookedAt: match.bookedAt,
+      },
+      { status: 409 }
+    );
+  }
+
+  const clubId = resolveGripoClubIdFromRecord({
+    gripoClubId: match.gripoClubId,
+    gripoUrl: match.gripoUrl || match.club,
+  });
+
   if (!clubId) {
     return NextResponse.json(
       {
@@ -54,24 +80,33 @@ export async function POST(
     notes?: string;
   };
 
-  // Determine booking date and time
+  // Determine booking date and time in Brasília timezone
   const matchDate = new Date(match.startsAt);
-  const dateStr =
-    body.date ||
-    matchDate.toISOString().split('T')[0];
+  const { date: defaultDateStr, time: defaultTimeStr } = formatBrasiliaDateParts(matchDate);
+  const dateStr = body.date || defaultDateStr;
 
   let courtId = body.courtId;
   let startHour = body.startHour;
   let endHour = body.endHour;
+  let detectedCourtName: string | undefined;
 
   // If specific slot not passed, find first matching/available slot
   if (!courtId || !startHour || !endHour) {
-    const hours = matchDate.getHours().toString().padStart(2, '0');
-    const minutes = matchDate.getMinutes().toString().padStart(2, '0');
-    const targetHour = `${hours}:${minutes}:00`;
-
+    const targetHour = `${defaultTimeStr}:00`;
     const slot = await findMatchingGripoSlot(clubId, dateStr, targetHour);
     if (!slot) {
+      if (db) {
+        await db
+          .update(matches)
+          .set({
+            bookingStatus: 'failed',
+            bookingMessage:
+              'Nenhuma quadra disponível encontrada no Gripo para este horário/data.',
+            updatedAt: new Date(),
+          })
+          .where(eq(matches.id, match.id));
+      }
+
       return NextResponse.json(
         {
           error:
@@ -85,6 +120,7 @@ export async function POST(
     courtId = slot.courtId;
     startHour = slot.startHour;
     endHour = slot.endHour;
+    detectedCourtName = slot.courtName;
   }
 
   const bookingResult = await confirmGripoBooking({
@@ -97,23 +133,77 @@ export async function POST(
   });
 
   if (!bookingResult.success) {
+    const errorMessage = bookingResult.error || 'Falha ao confirmar reserva no Gripo.';
+    if (db) {
+      await db
+        .update(matches)
+        .set({
+          bookingStatus: 'failed',
+          bookingMessage: errorMessage,
+          updatedAt: new Date(),
+        })
+        .where(eq(matches.id, match.id));
+    }
+
     return NextResponse.json(
       {
-        error: bookingResult.error,
+        error: errorMessage,
         manualUrl: match.gripoUrl,
       },
       { status: 400 }
     );
   }
 
+  const bookedCourtName = bookingResult.courtName || detectedCourtName || null;
+  const bookingMessage = bookingResult.message || 'Reserva confirmada no Gripo!';
+  const bookedAt = new Date();
+  const effectiveStartsAt = createBrasiliaDate(dateStr, startHour);
+  const effectiveDurationMinutes = calculateSlotDuration(startHour, endHour);
+
+  if (db) {
+    await db
+      .update(matches)
+      .set({
+        bookingStatus: 'booked',
+        bookedCourtName,
+        gripoScheduleId: bookingResult.scheduleId ?? null,
+        bookingMessage,
+        bookedAt,
+        updatedAt: bookedAt,
+      })
+      .where(eq(matches.id, match.id));
+
+    const [matchRow] = await db
+      .select({ roomId: matches.roomId })
+      .from(matches)
+      .where(eq(matches.id, match.id))
+      .limit(1);
+
+    if (matchRow?.roomId) {
+      await db
+        .update(matchRooms)
+        .set({
+          startsAt: effectiveStartsAt,
+          durationMinutes: effectiveDurationMinutes,
+          updatedAt: bookedAt,
+        })
+        .where(eq(matchRooms.id, matchRow.roomId));
+    }
+  }
+
   return NextResponse.json({
     ok: true,
-    message: bookingResult.message,
+    message: bookingMessage,
     scheduleId: bookingResult.scheduleId,
-    courtName: bookingResult.courtName,
+    courtName: bookedCourtName,
     courtId,
     date: dateStr,
     startHour,
     endHour,
+    bookingStatus: 'booked',
+    bookedCourtName,
+    gripoScheduleId: bookingResult.scheduleId,
+    bookingMessage,
+    bookedAt: bookedAt.toISOString(),
   });
 }

@@ -5,5 +5,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const match = await loadMatchDetails(id);
   if (!match) return NextResponse.json({ error: 'Partida não encontrada.' }, { status: 404 });
-  return NextResponse.json({ match });
+  return NextResponse.json({
+    match,
+    bookingStatus: match.bookingStatus,
+    bookedCourtName: match.bookedCourtName,
+    bookingMessage: match.bookingMessage,
+    bookedAt: match.bookedAt,
+    bookingPriceCents: match.bookingPriceCents,
+  });
 }

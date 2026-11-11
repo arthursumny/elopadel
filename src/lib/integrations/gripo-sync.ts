@@ -69,6 +69,7 @@ export async function syncGripoClubsDatabase(): Promise<{
     state: string;
     country: string;
     gripoUrl: string;
+    gripoClubId: number;
     address: string | null;
   }> = [];
 
@@ -93,6 +94,7 @@ export async function syncGripoClubsDatabase(): Promise<{
             state: stateInitials.trim().toUpperCase(),
             country: city.country?.name || 'Brasil',
             gripoUrl: `https://gripo.app/${club.slug}`,
+            gripoClubId: club.id,
             address: contactStr,
           };
         });
@@ -117,6 +119,7 @@ export async function syncGripoClubsDatabase(): Promise<{
         state: club.state,
         country: club.country,
         gripoUrl: club.gripoUrl,
+        gripoClubId: club.gripoClubId,
         address: club.address,
         isActive: true,
       })
@@ -124,6 +127,7 @@ export async function syncGripoClubsDatabase(): Promise<{
         target: [clubs.name, clubs.city, clubs.state, clubs.country],
         set: {
           gripoUrl: club.gripoUrl,
+          gripoClubId: club.gripoClubId,
           address: club.address,
           isActive: true,
           updatedAt: new Date(),

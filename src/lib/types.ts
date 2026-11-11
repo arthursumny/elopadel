@@ -245,6 +245,12 @@ export type MatchDetails = {
   city: string;
   gripoUrl: string;
   gripoClubId?: number | null;
+  bookingStatus?: string | null;
+  bookedCourtName?: string | null;
+  gripoScheduleId?: number | null;
+  bookingMessage?: string | null;
+  bookedAt?: string | null;
+  bookingPriceCents?: number | null;
   bookedCourt?: { courtName: string; scheduleId: number } | null;
   winner?: 'A' | 'B';
   sets: Array<{ a: number; b: number }>;

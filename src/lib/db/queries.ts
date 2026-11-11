@@ -5,7 +5,7 @@ import { categoryFromTier, RANKS, getRank } from '@/lib/ranks';
 import { getMatchDurationMinutes, getResultDeadline } from '@/lib/match-config';
 import type { ActiveMatchSearch, ActivityItem, AdminClub, AdminPlayer, Friend, FriendRequest, HistoryData, HistoryItem, LeaderboardEntry, MatchChallenge, MatchDetails, MatchSearchInvitation, MatchmakingPlayerOption, OpenRoom, Player, RoomInvitation, SeasonData, SeasonLeaderboardEntry } from '@/lib/types';
 import { normalizeCourtSide } from '@/lib/domain/matchmaking';
-import { resolveGripoClubId } from '@/lib/integrations/gripo';
+import { resolveGripoClubId, resolveGripoClubIdFromRecord } from '@/lib/integrations/gripo';
 import { db } from './index';
 import { getPlayer } from '@/lib/runtime-store';
 import { clubAccounts, clubMemberships, clubs, friendships, matchChallengeMembers, matchChallenges, matchParticipants, matchRooms, matchSearches, matches, ratingEvents, ratings, rankStates, roomInvitations, roomParticipants, seasonStats, seasons, users } from './schema';
@@ -337,7 +337,7 @@ export async function loadMatchDetails(matchId: string): Promise<MatchDetails | 
   if (!hasDatabase()) return null;
   const [match] = await db!.select().from(matches).where(eq(matches.id, matchId)).limit(1);
   if (!match) return null;
-  const [room] = match.roomId ? await db!.select({ startsAt: matchRooms.startsAt, durationMinutes: matchRooms.durationMinutes, club: clubs.name, city: clubs.city, gripoUrl: clubs.gripoUrl }).from(matchRooms).leftJoin(clubs, eq(clubs.id, matchRooms.clubId)).where(eq(matchRooms.id, match.roomId)).limit(1) : [];
+  const [room] = match.roomId ? await db!.select({ startsAt: matchRooms.startsAt, durationMinutes: matchRooms.durationMinutes, club: clubs.name, city: clubs.city, gripoUrl: clubs.gripoUrl, gripoClubId: clubs.gripoClubId }).from(matchRooms).leftJoin(clubs, eq(clubs.id, matchRooms.clubId)).where(eq(matchRooms.id, match.roomId)).limit(1) : [];
   const userId = await currentUserId();
   const participants = await db!.select({ participant: matchParticipants, user: users, rank: rankStates }).from(matchParticipants).innerJoin(users, eq(users.id, matchParticipants.userId)).innerJoin(rankStates, eq(rankStates.userId, matchParticipants.userId)).where(eq(matchParticipants.matchId, matchId)).orderBy(matchParticipants.createdAt);
   const resultVotes = resultVoteCounts(participants.map(({ participant }) => ({ playerId: participant.userId, team: participant.team as 'A' | 'B', status: participant.confirmation as 'confirmed' | 'disputed', winner: participant.resultWinner as 'A' | 'B' | null })));
@@ -345,8 +345,32 @@ export async function loadMatchDetails(matchId: string): Promise<MatchDetails | 
   const durationMinutes = room?.durationMinutes ?? getMatchDurationMinutes();
   const acceptedCount = participants.filter(({ participant }) => participant.matchAcceptance === 'accepted').length;
   const attendanceCount = participants.filter(({ participant }) => ['claimed-present', 'present'].includes(participant.attendance)).length;
-  const gripoClubId = resolveGripoClubId(room?.gripoUrl ?? room?.club);
-  return { id: match.id, mode: match.mode as MatchDetails['mode'], status: match.status as MatchDetails['status'], startsAt: startsAt.toISOString(), durationMinutes, resultDeadlineAt: (match.resultDeadlineAt ?? getResultDeadline(startsAt, durationMinutes)).toISOString(), acceptedCount, attendanceCount, club: room?.club ?? 'Clube não informado', city: room?.city ?? 'Local não informado', gripoUrl: room?.gripoUrl ?? process.env.GRIPO_DEFAULT_URL ?? 'https://gripo.app', gripoClubId, winner: match.winner as 'A' | 'B' | undefined, sets: match.sets ?? [], resultVotes, participants: participants.map(({ participant, user, rank }) => ({ id: participant.id, userId: participant.userId, name: user.displayName, handle: user.handle, team: participant.team as 'A' | 'B', tier: rank.tier, matchAcceptance: participant.matchAcceptance, confirmation: participant.confirmation, resultWinner: participant.resultWinner as 'A' | 'B' | null, attendance: participant.attendance, isCurrentPlayer: participant.userId === userId })) };
+  const gripoClubId = resolveGripoClubIdFromRecord({ gripoClubId: room?.gripoClubId, gripoUrl: room?.gripoUrl ?? room?.club });
+  return {
+    id: match.id,
+    mode: match.mode as MatchDetails['mode'],
+    status: match.status as MatchDetails['status'],
+    startsAt: startsAt.toISOString(),
+    durationMinutes,
+    resultDeadlineAt: (match.resultDeadlineAt ?? getResultDeadline(startsAt, durationMinutes)).toISOString(),
+    acceptedCount,
+    attendanceCount,
+    club: room?.club ?? 'Clube não informado',
+    city: room?.city ?? 'Local não informado',
+    gripoUrl: room?.gripoUrl ?? process.env.GRIPO_DEFAULT_URL ?? 'https://gripo.app',
+    gripoClubId,
+    bookingStatus: match.bookingStatus,
+    bookedCourtName: match.bookedCourtName,
+    gripoScheduleId: match.gripoScheduleId,
+    bookingMessage: match.bookingMessage,
+    bookedAt: match.bookedAt ? match.bookedAt.toISOString() : null,
+    bookingPriceCents: match.bookingPriceCents ?? null,
+    bookedCourt: match.bookedCourtName && match.gripoScheduleId ? { courtName: match.bookedCourtName, scheduleId: match.gripoScheduleId } : (match.bookedCourtName ? { courtName: match.bookedCourtName, scheduleId: 0 } : null),
+    winner: match.winner as 'A' | 'B' | undefined,
+    sets: match.sets ?? [],
+    resultVotes,
+    participants: participants.map(({ participant, user, rank }) => ({ id: participant.id, userId: participant.userId, name: user.displayName, handle: user.handle, team: participant.team as 'A' | 'B', tier: rank.tier, matchAcceptance: participant.matchAcceptance, confirmation: participant.confirmation, resultWinner: participant.resultWinner as 'A' | 'B' | null, attendance: participant.attendance, isCurrentPlayer: participant.userId === userId }))
+  };
 }
 
 export async function loadSeason(): Promise<SeasonData> {
