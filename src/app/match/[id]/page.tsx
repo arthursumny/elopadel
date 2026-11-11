@@ -344,13 +344,13 @@ function MatchView({ id }: { id: string }) {
                 <span>{details.bookedCourtName || bookedCourt || 'Quadra confirmada'}</span>
                 <span className="text-white/30">•</span>
                 <span className="text-xs font-semibold text-white/70">
-                  {startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  {startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} às {matchEnd.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </span>
                 {typeof details.bookingPriceCents === 'number' && (
                   <>
                     <span className="text-white/30">•</span>
                     <span className="text-xs font-semibold text-lime">
-                      {`R$ ${(details.bookingPriceCents / 100).toFixed(2).replace('.', ',')}`}
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(details.bookingPriceCents / 100)}
                     </span>
                   </>
                 )}
@@ -360,6 +360,9 @@ function MatchView({ id }: { id: string }) {
                   {details.bookingMessage}
                 </p>
               )}
+              <p className="mt-2 text-[11px] leading-relaxed text-white/45">
+                Cancelamento com menos de 4 horas de antecedência é cobrado no valor integral da locação. O pagamento é feito direto com o clube pelo link enviado na confirmação.
+              </p>
             </div>
           )}
 
