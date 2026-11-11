@@ -5,12 +5,14 @@ import {
   resolveGripoClubId,
   getGripoAuthToken,
   clearGripoCachedToken,
+  clearGripoAvailabilityCache,
 } from './gripo';
 
 describe('Gripo Integration Client', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearGripoCachedToken();
+    clearGripoAvailabilityCache();
     delete process.env.GRIPO_TOKEN;
     delete process.env.GRIPO_LOGIN;
     delete process.env.GRIPO_PASSWORD;

@@ -261,6 +261,9 @@ describe('autoBookMatchCourt', () => {
       startTime: '18:30',
       durationMinutes: 90,
       sport: 'padel',
+      allowNonPadelCourts: false,
+      windowStart: '18:30',
+      windowEnd: '20:00',
     });
     expect(mocks.confirmGripoBooking).toHaveBeenCalledWith({
       clubId: 122,
@@ -373,14 +376,12 @@ describe('autoBookMatchCourt', () => {
 
     expect(result).toEqual({
       bookingStatus: 'failed',
-      bookingMessage:
-        'Nenhuma quadra de padel com horário livre para a duração da partida no Gripo.',
+      bookingMessage: 'Sem quadra de padel disponível no Gripo para este horário.',
     });
 
     expect(updates[0]).toMatchObject({
       bookingStatus: 'failed',
-      bookingMessage:
-        'Nenhuma quadra de padel com horário livre para a duração da partida no Gripo.',
+      bookingMessage: 'Sem quadra de padel disponível no Gripo para este horário.',
     });
 
     expect(mocks.confirmGripoBooking).not.toHaveBeenCalled();

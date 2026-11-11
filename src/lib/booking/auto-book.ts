@@ -5,6 +5,7 @@ import {
   confirmGripoBooking,
   findBestSlotForMatch,
   findMatchingGripoSlot,
+  minutesToTimeString,
   resolveGripoClubIdFromRecord,
 } from '@/lib/integrations/gripo';
 import { notifyUsers } from '@/lib/db/notifications';
@@ -163,18 +164,25 @@ export async function autoBookMatchCourt(matchId: string): Promise<AutoBookResul
 
     // Deriva data e hora da sala no fuso de Brasília
     const { date, time } = formatBrasiliaDateParts(room.startsAt);
+    const durationMinutes = room.durationMinutes ?? 90;
+    const windowStart = time;
+    const startMins = parseTimeMinutes(time);
+    const endMins = startMins + durationMinutes;
+    const windowEnd = minutesToTimeString(endMins);
 
     // Consulta disponibilidade no Gripo
     const slot = await findBestSlotForMatch({
       clubId: numericClubId,
       date,
       startTime: time,
-      durationMinutes: room.durationMinutes ?? 90,
+      durationMinutes,
       sport: 'padel',
+      allowNonPadelCourts: false,
+      windowStart,
+      windowEnd,
     });
     if (!slot) {
-      const failMessage =
-        'Nenhuma quadra de padel com horário livre para a duração da partida no Gripo.';
+      const failMessage = 'Sem quadra de padel disponível no Gripo para este horário.';
       await db
         .update(matches)
         .set({

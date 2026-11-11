@@ -59,6 +59,17 @@ export interface GripoBookingResult {
 let cachedToken: string | null = null;
 let cachedTokenExpiresAt = 0;
 
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const availabilityCache = new Map<string, CacheEntry<GripoAvailabilityResponse>>();
+
+export function clearGripoAvailabilityCache(): void {
+  availabilityCache.clear();
+}
+
 export function getGripoBaseHeaders(token?: string | null): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -148,6 +159,12 @@ export async function fetchGripoAvailability(
   clubId: number,
   date: string
 ): Promise<GripoAvailabilityResponse> {
+  const cacheKey = `${clubId}:${date}`;
+  const cached = availabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
   const headers = getGripoBaseHeaders();
   const response = await fetch(`${GRIPO_API_BASE}/schedule/available`, {
     method: 'POST',
@@ -224,12 +241,19 @@ export async function fetchGripoAvailability(
     })),
   }));
 
-  return {
+  const result: GripoAvailabilityResponse = {
     date: raw.date || date,
     scheduleNotes: raw.schedule_notes,
     limitDateSchedule: raw.limit_date_schedule,
     courts,
   };
+
+  availabilityCache.set(cacheKey, {
+    data: result,
+    expiresAt: Date.now() + 60_000,
+  });
+
+  return result;
 }
 
 /**
@@ -275,7 +299,7 @@ export function calculateSlotDurationMinutes(startHour: string, endHour: string)
   return diff > 0 ? diff : diff + 1440;
 }
 
-export function getCourtQualityScore(court: GripoCourt): number {
+export function isSandCourt(court: GripoCourt): boolean {
   const norm = (str?: string) =>
     (str || '')
       .toLowerCase()
@@ -287,13 +311,48 @@ export function getCourtQualityScore(court: GripoCourt): number {
   const tagsStr = (court.tags || []).map(norm).join(' ');
 
   const sandKeywords = ['beach', 'areia', 'futevolei', 'volei', 'sand'];
-  const isSand = sandKeywords.some(
+  return sandKeywords.some(
     (k) => name.includes(k) || type.includes(k) || tagsStr.includes(k)
   );
+}
 
-  if (isSand) {
+export function isRealPadelCourt(court: GripoCourt): boolean {
+  if (isSandCourt(court)) {
+    return false;
+  }
+
+  const norm = (str?: string) =>
+    (str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const name = norm(court.name);
+  const type = norm(court.type);
+
+  const isGlass =
+    type === 'vidro' ||
+    type === 'glass' ||
+    type.includes('vidro') ||
+    type.includes('glass');
+  const hasPadel = name.includes('padel');
+
+  return isGlass || hasPadel;
+}
+
+export function getCourtQualityScore(court: GripoCourt): number {
+  if (isSandCourt(court)) {
     return -1000;
   }
+
+  const norm = (str?: string) =>
+    (str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const name = norm(court.name);
+  const type = norm(court.type);
 
   let score = 0;
   const isGlass =
@@ -318,26 +377,34 @@ export interface BestSlotResult {
   slotIds: string[];
 }
 
+export interface SelectBestSlotOptions {
+  startTime: string;
+  durationMinutes: number;
+  sport?: string;
+  allowNonPadelCourts?: boolean;
+  windowStart?: string;
+  windowEnd?: string;
+}
+
 /**
  * Pure function to select the best slot matching duration and court preferences.
  */
 export function selectBestSlot(
   availability: GripoAvailabilityResponse,
-  params: {
-    startTime: string;
-    durationMinutes: number;
-    sport?: string;
-  }
+  params: SelectBestSlotOptions
 ): BestSlotResult | null {
   const requestedStartHHMM = normalizeToHHMM(params.startTime);
   const requestedStartMins = parseTimeToMinutes(requestedStartHHMM);
   const duration = params.durationMinutes;
+  const allowNonPadel = params.allowNonPadelCourts ?? false;
 
   if (duration <= 0 || !availability?.courts?.length) {
     return null;
   }
 
-  const offsets = [0, 30, 60, 90, 120];
+  const hasWindow = params.windowStart !== undefined || params.windowEnd !== undefined;
+  const wStartMins = params.windowStart ? parseTimeToMinutes(normalizeToHHMM(params.windowStart)) : null;
+  const wEndMins = params.windowEnd ? parseTimeToMinutes(normalizeToHHMM(params.windowEnd)) : null;
 
   interface Candidate {
     courtId: number;
@@ -351,8 +418,13 @@ export function selectBestSlot(
   }
 
   const candidates: Candidate[] = [];
+  const seenCandidates = new Set<string>();
 
   for (const court of availability.courts) {
+    if (!allowNonPadel && !isRealPadelCourt(court)) {
+      continue;
+    }
+
     const courtScore = getCourtQualityScore(court);
 
     // Filter slots by availability and sport
@@ -366,8 +438,27 @@ export function selectBestSlot(
       return true;
     });
 
-    for (const offset of offsets) {
-      const candidateStartMins = requestedStartMins + offset;
+    if (validSlots.length === 0) {
+      continue;
+    }
+
+    let possibleStartMins: number[];
+    if (hasWindow) {
+      const allStarts = Array.from(
+        new Set(validSlots.map((s) => parseTimeToMinutes(normalizeToHHMM(s.startHour))))
+      ).sort((a, b) => a - b);
+
+      possibleStartMins = allStarts.filter((startM) => {
+        if (wStartMins !== null && startM < wStartMins) return false;
+        if (wEndMins !== null && startM + duration > wEndMins) return false;
+        return true;
+      });
+    } else {
+      const offsets = [0, 30, 60, 90, 120];
+      possibleStartMins = offsets.map((off) => requestedStartMins + off);
+    }
+
+    for (const candidateStartMins of possibleStartMins) {
       const targetEndMins = candidateStartMins + duration;
       let cursorMins = candidateStartMins;
       let cursorStr = minutesToTimeString(cursorMins);
@@ -393,6 +484,24 @@ export function selectBestSlot(
       }
 
       if (cursorMins >= targetEndMins && matchedSlots.length > 0) {
+        const candidateStartStr = normalizeToHHMM(matchedSlots[0].startHour);
+        const candidateEndStr = normalizeToHHMM(matchedSlots[matchedSlots.length - 1].endHour);
+        const actualStartMins = parseTimeToMinutes(candidateStartStr);
+        const actualEndMins = cursorMins;
+
+        if (wStartMins !== null && actualStartMins < wStartMins) {
+          continue;
+        }
+        if (wEndMins !== null && actualEndMins > wEndMins) {
+          continue;
+        }
+
+        const candidateKey = `${court.id}:${candidateStartStr}:${candidateEndStr}`;
+        if (seenCandidates.has(candidateKey)) {
+          continue;
+        }
+        seenCandidates.add(candidateKey);
+
         let hasPrice = false;
         let totalPrice = 0;
         for (const s of matchedSlots) {
@@ -406,15 +515,17 @@ export function selectBestSlot(
           s.hash || String((s as unknown as { id?: string | number }).id ?? s.scheduleGridId ?? '')
         );
 
+        const offsetMinutes = Math.abs(actualStartMins - requestedStartMins);
+
         candidates.push({
           courtId: court.id,
           courtName: court.name,
-          startHour: normalizeToHHMM(matchedSlots[0].startHour),
-          endHour: normalizeToHHMM(matchedSlots[matchedSlots.length - 1].endHour),
+          startHour: candidateStartStr,
+          endHour: candidateEndStr,
           totalPriceCents: hasPrice ? totalPrice : null,
           slotIds,
           courtScore,
-          offsetMinutes: offset,
+          offsetMinutes,
         });
       }
     }
@@ -428,6 +539,8 @@ export function selectBestSlot(
   // 1. preferir quadras 'de padel de verdade' (courtScore maior)
   // 2. depois preferir o início mais próximo do horário pedido (offsetMinutes menor)
   // 3. em empate, preferir o menor preço total
+  // 4. em empate, preferir início mais cedo
+  // 5. menor id da quadra
   candidates.sort((a, b) => {
     if (b.courtScore !== a.courtScore) {
       return b.courtScore - a.courtScore;
@@ -444,6 +557,11 @@ export function selectBestSlot(
     } else if (b.totalPriceCents !== null) {
       return 1;
     }
+    const aStart = parseTimeToMinutes(a.startHour);
+    const bStart = parseTimeToMinutes(b.startHour);
+    if (aStart !== bStart) {
+      return aStart - bStart;
+    }
     return a.courtId - b.courtId;
   });
 
@@ -458,28 +576,42 @@ export function selectBestSlot(
   };
 }
 
+export interface FindBestSlotForMatchOptions extends SelectBestSlotOptions {
+  clubId: number;
+  date: string;
+}
+
+export const gripoApi = {
+  fetchGripoAvailability,
+};
+
 /**
  * Find the best court slot for a match from Gripo availability.
  */
-export async function findBestSlotForMatch(params: {
-  clubId: number;
-  date: string;
-  startTime: string;
-  durationMinutes: number;
-  sport?: string;
-}): Promise<{
-  courtId: number;
-  courtName: string;
-  startHour: string;
-  endHour: string;
-  totalPriceCents: number | null;
-  slotIds: string[];
-} | null> {
-  const availability = await fetchGripoAvailability(params.clubId, params.date);
+export async function findBestSlotForMatch(
+  params: FindBestSlotForMatchOptions
+): Promise<BestSlotResult | null> {
+  const cacheKey = `${params.clubId}:${params.date}`;
+  let availability: GripoAvailabilityResponse;
+
+  const cached = availabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    availability = cached.data;
+  } else {
+    availability = await gripoApi.fetchGripoAvailability(params.clubId, params.date);
+    availabilityCache.set(cacheKey, {
+      data: availability,
+      expiresAt: Date.now() + 60_000,
+    });
+  }
+
   return selectBestSlot(availability, {
     startTime: params.startTime,
     durationMinutes: params.durationMinutes,
     sport: params.sport,
+    allowNonPadelCourts: params.allowNonPadelCourts,
+    windowStart: params.windowStart,
+    windowEnd: params.windowEnd,
   });
 }
 

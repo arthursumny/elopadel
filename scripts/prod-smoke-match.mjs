@@ -18,6 +18,7 @@
  *   DATABASE_URL="postgresql://..." node scripts/prod-smoke-match.mjs [baseUrl] --dispute
  *   DATABASE_URL="postgresql://..." node scripts/prod-smoke-match.mjs [baseUrl] --cleanup
  *   DATABASE_URL="postgresql://..." node scripts/prod-smoke-match.mjs [baseUrl] --cleanup=users
+ *   DATABASE_URL="postgresql://..." node scripts/prod-smoke-match.mjs [baseUrl] [--club=<uuid>] [--date=YYYY-MM-DD] [--from=HH:MM] [--to=HH:MM]
  */
 import postgres from 'postgres';
 
@@ -27,7 +28,35 @@ if (!process.env.DATABASE_URL) {
 }
 
 const args = process.argv.slice(2);
-const BASE = args.find((arg) => !arg.startsWith('--')) ?? 'http://127.0.0.1:3100';
+
+function getNamedArg(name) {
+  const prefix = `--${name}=`;
+  const match = args.find((arg) => arg.startsWith(prefix));
+  if (match) return match.slice(prefix.length);
+  const index = args.indexOf(`--${name}`);
+  if (index !== -1 && index + 1 < args.length && !args[index + 1].startsWith('--')) {
+    return args[index + 1];
+  }
+  return undefined;
+}
+
+const clubArg = getNamedArg('club')?.trim() || undefined;
+const dateArg = getNamedArg('date')?.trim() || undefined;
+const fromArg = getNamedArg('from')?.trim() || undefined;
+const toArg = getNamedArg('to')?.trim() || undefined;
+
+const consumedArgs = new Set(
+  ['club', 'date', 'from', 'to']
+    .map((name) => {
+      const idx = args.indexOf(`--${name}`);
+      return idx !== -1 && idx + 1 < args.length && !args[idx + 1].startsWith('--')
+        ? args[idx + 1]
+        : null;
+    })
+    .filter(Boolean),
+);
+
+const BASE = args.find((arg) => !arg.startsWith('--') && !consumedArgs.has(arg)) ?? 'http://127.0.0.1:3100';
 const isCleanupUsers = args.includes('--cleanup=users');
 const isCleanupOnly = args.includes('--cleanup') || isCleanupUsers;
 const dispute = args.includes('--dispute');
@@ -289,7 +318,9 @@ async function main() {
     sessions.push({ ...user, token: data.token });
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const targetDate = dateArg ?? new Date().toISOString().slice(0, 10);
+  const targetFrom = fromArg ?? '18:00';
+  const targetTo = toArg ?? '23:59';
   const searches = [];
   let formedMatchId = null;
   for (const session of sessions) {
@@ -300,11 +331,12 @@ async function main() {
         partyType: 'solo',
         mode: 'friendly',
         city: 'Joaçaba',
-        dates: [today],
-        from: '18:00',
-        to: '23:59',
+        dates: [targetDate],
+        from: targetFrom,
+        to: targetTo,
         sidePreference: session.side,
         replace: true,
+        ...(clubArg ? { clubId: clubArg } : {}),
       },
     });
     const data = step(`busca ${session.email}`, search);
@@ -364,6 +396,15 @@ async function main() {
     });
     step(`aceite ${session.email}`, accept);
   }
+
+  const matchDetails = await api(`/api/matches/${matchId}`, { token: sessions[0].token });
+  const booking = {
+    bookingStatus: matchDetails.data?.bookingStatus ?? matchDetails.data?.match?.bookingStatus ?? null,
+    bookedCourtName: matchDetails.data?.bookedCourtName ?? matchDetails.data?.match?.bookedCourtName ?? null,
+    bookingMessage: matchDetails.data?.bookingMessage ?? matchDetails.data?.match?.bookingMessage ?? null,
+    bookingPriceCents: matchDetails.data?.bookingPriceCents ?? matchDetails.data?.match?.bookingPriceCents ?? null,
+  };
+  console.log('\nreserva:', booking);
 
   // Recua o horário da quadra para a janela de check-in estar aberta.
   await sql(`update match_rooms set starts_at = now() - interval '2 minutes' where id = (select room_id from matches where id = '${matchId}')`);

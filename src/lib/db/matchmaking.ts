@@ -1,14 +1,16 @@
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { areCompetitivePlayersCompatible, areTeamSidesCompatible, buildTeamAssignments, findAvailabilityOverlap, findMatchmakingGroup, normalizeCourtSide, type CompetitivePlayer, type MatchmakingParty } from '@/lib/domain/matchmaking';
 import type { CourtSide } from '@/lib/types';
 import { getMatchDurationMinutes, getResultDeadline } from '@/lib/match-config';
 import { areCanonicalLocationsEqual, staleLocationReadiness } from '@/lib/location-domain';
 import type { VerifiedLocation } from '@/lib/location';
 import { categoryFromTier } from '@/lib/ranks';
+import { resolveBookableSlot } from '@/lib/booking/availability';
+import { findBestSlotForMatch } from '@/lib/integrations/gripo';
 import { isRankedSuspended } from './competition';
 import { db } from './index';
 import { notifyMatchParticipants, notifyUsers } from './notifications';
-import { matchParticipants, matchRooms, matchSearches, matches, rankStates, ratings, roomParticipants, users } from './schema';
+import { clubs, matchParticipants, matchRooms, matchSearches, matches, rankStates, ratings, roomParticipants, users } from './schema';
 
 export type CreateMatchSearchInput = {
   userId: string;
@@ -45,11 +47,12 @@ async function loadSearchPlayers(userIds: string[]) {
 }
 
 function toDateWithOffset(date: string, time: string, timezoneOffset: number) {
+  const normalizedTime = time.length > 5 ? time.slice(0, 5) : time;
   const absoluteOffset = Math.abs(timezoneOffset);
   const hours = String(Math.floor(absoluteOffset / 60)).padStart(2, '0');
   const minutes = String(absoluteOffset % 60).padStart(2, '0');
   const sign = timezoneOffset <= 0 ? '+' : '-';
-  return new Date(`${date}T${time}:00${sign}${hours}:${minutes}`);
+  return new Date(`${date}T${normalizedTime}:00${sign}${hours}:${minutes}`);
 }
 
 async function tryMatchmaking(tx: MatchmakingTransaction, timezoneOffset: number): Promise<MatchmakingResult> {
@@ -68,14 +71,66 @@ async function tryMatchmaking(tx: MatchmakingTransaction, timezoneOffset: number
   const assignments = buildTeamAssignments(group);
   const members = group.flatMap((party) => party.members);
   if (!overlap || Object.keys(assignments).length !== 4 || new Set(members.map((member) => member.id)).size !== 4) return { matched: false };
-  const startsAt = toDateWithOffset(overlap.date, overlap.from, group[0]?.timezoneOffset ?? timezoneOffset);
+  const initialStartsAt = toDateWithOffset(overlap.date, overlap.from, group[0]?.timezoneOffset ?? timezoneOffset);
+  if (Number.isNaN(initialStartsAt.getTime()) || initialStartsAt <= now) return { matched: false };
+
+  const partyCity = group[0]?.city ?? parties[0].city;
+  const partyState = group[0]?.state ?? parties[0].state;
+  const candidateClubs = overlap.clubId
+    ? await tx
+        .select({ id: clubs.id, gripoClubId: clubs.gripoClubId, name: clubs.name })
+        .from(clubs)
+        .where(eq(clubs.id, overlap.clubId))
+        .limit(1)
+    : await tx
+        .select({ id: clubs.id, gripoClubId: clubs.gripoClubId, name: clubs.name })
+        .from(clubs)
+        .where(
+          and(
+            eq(clubs.isActive, true),
+            eq(clubs.city, partyCity),
+            partyState ? eq(clubs.state, partyState) : undefined,
+            isNotNull(clubs.gripoClubId),
+          ),
+        )
+        .orderBy(asc(clubs.name))
+        .limit(6);
+
+  let bookableSlot = null;
+  try {
+    bookableSlot = await resolveBookableSlot({
+      clubs: candidateClubs,
+      date: overlap.date,
+      windowStart: overlap.from,
+      windowEnd: overlap.to,
+      durationMinutes,
+      findSlot: (params) =>
+        findBestSlotForMatch({
+          clubId: params.gripoClubId,
+          date: params.date,
+          startTime: params.startTime,
+          windowStart: params.windowStart,
+          windowEnd: params.windowEnd,
+          durationMinutes: params.durationMinutes,
+          sport: 'padel',
+          allowNonPadelCourts: false,
+        }),
+    });
+  } catch (error) {
+    console.warn('[tryMatchmaking] Erro ao resolver disponibilidade no Gripo:', error);
+    return { matched: false };
+  }
+
+  if (!bookableSlot) return { matched: false };
+
+  const startsAt = toDateWithOffset(overlap.date, bookableSlot.startHour, group[0]?.timezoneOffset ?? timezoneOffset);
   if (Number.isNaN(startsAt.getTime()) || startsAt <= now) return { matched: false };
 
   const groupIds = group.map((party) => party.id);
   const claimed = await tx.update(matchSearches).set({ status: 'matching', updatedAt: now }).where(and(eq(matchSearches.status, 'searching'), inArray(matchSearches.id, groupIds))).returning({ id: matchSearches.id });
   if (claimed.length !== groupIds.length) throw new Error('A busca mudou durante a claim; a transação de matchmaking deve ser revertida.');
 
-  const [room] = await tx.insert(matchRooms).values({ hostId: members[0].id, clubId: overlap.clubId, mode: group[0].mode, kind: 'auto-match', status: 'full', startsAt, durationMinutes, tierMin: group[0].mode === 'ranked' ? categoryFromTier(members[0]?.tier) || null : null, preferences: ['Busca automática', group.length > 1 ? 'Disponibilidade em comum' : ''] }).returning();
+  const [room] = await tx.insert(matchRooms).values({ hostId: members[0].id, clubId: bookableSlot.clubId, mode: group[0].mode, kind: 'auto-match', status: 'full', startsAt, durationMinutes, tierMin: group[0].mode === 'ranked' ? categoryFromTier(members[0]?.tier) || null : null, preferences: ['Busca automática', group.length > 1 ? 'Disponibilidade em comum' : ''] }).returning();
   await tx.insert(roomParticipants).values(members.map((member) => ({ roomId: room.id, userId: member.id, team: assignments[member.id], status: 'joined' })));
   const [match] = await tx.insert(matches).values({ roomId: room.id, mode: group[0].mode, status: 'confirming', resultDeadlineAt: getResultDeadline(startsAt, durationMinutes) }).returning();
   await tx.insert(matchParticipants).values(members.map((member) => ({ matchId: match.id, userId: member.id, team: assignments[member.id], matchAcceptance: 'pending', confirmation: 'pending' })));

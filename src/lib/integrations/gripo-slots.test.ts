@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearGripoAvailabilityCache,
   findBestSlotForMatch,
   GripoAvailabilityResponse,
+  gripoApi,
   selectBestSlot,
 } from './gripo';
 
 describe('Gripo Slot Selection (selectBestSlot & findBestSlotForMatch)', () => {
+  beforeEach(() => {
+    clearGripoAvailabilityCache();
+  });
   // Dados reais observados no Racket Center (club_id 122, 2026-11-19):
   // Quadra Padel 1 | 1 | Vidro | 18:00-18:30(40), 21:30-23:00(100)
   // Quadra Padel 3 | 7 | Vidro | 18:00-18:30(40)
@@ -439,7 +444,7 @@ describe('Gripo Slot Selection (selectBestSlot & findBestSlotForMatch)', () => {
     expect(result).toBeNull();
   });
 
-  it('(d) escolhe areia como último recurso (quando só há areia) mas ainda cobrindo a duração completa', () => {
+  it('(a) com allowNonPadelCourts=false e apenas areia disponível, retorna null', () => {
     // Apenas a quadra de areia possui horários disponíveis cobrindo 90 min
     const fixtureOnlySand: GripoAvailabilityResponse = {
       date: '2026-11-19',
@@ -521,10 +526,110 @@ describe('Gripo Slot Selection (selectBestSlot & findBestSlotForMatch)', () => {
       ],
     };
 
+    // Default allowNonPadelCourts: false
+    const resultDefault = selectBestSlot(fixtureOnlySand, {
+      startTime: '18:30',
+      durationMinutes: 90,
+      sport: 'padel',
+    });
+    expect(resultDefault).toBeNull();
+
+    // Explicit allowNonPadelCourts: false
+    const resultExplicit = selectBestSlot(fixtureOnlySand, {
+      startTime: '18:30',
+      durationMinutes: 90,
+      sport: 'padel',
+      allowNonPadelCourts: false,
+    });
+    expect(resultExplicit).toBeNull();
+  });
+
+  it('(b) com allowNonPadelCourts=true volta a aceitar areia', () => {
+    const fixtureOnlySand: GripoAvailabilityResponse = {
+      date: '2026-11-19',
+      courts: [
+        {
+          id: 1,
+          name: 'Quadra Padel 1',
+          type: 'Vidro',
+          hours: [
+            {
+              date: '2026-11-19',
+              hour: '18:00:00',
+              startHour: '18:00:00',
+              endHour: '18:30:00',
+              interval: 30,
+              available: false,
+              availableToSchedule: false,
+              courtId: 1,
+              courtName: 'Quadra Padel 1',
+              scheduleGridId: 101,
+              priceInCents: 4000,
+              hash: 'h-p1-busy',
+              sport: 'padel',
+            },
+          ],
+        },
+        {
+          id: 3,
+          name: 'Q1 - Beach Tennis',
+          type: 'Areia',
+          hours: [
+            {
+              date: '2026-11-19',
+              hour: '18:30:00',
+              startHour: '18:30:00',
+              endHour: '19:00:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 3,
+              courtName: 'Q1 - Beach Tennis',
+              scheduleGridId: 301,
+              priceInCents: 2500,
+              hash: 'h-b1',
+              sport: 'padel',
+            },
+            {
+              date: '2026-11-19',
+              hour: '19:00:00',
+              startHour: '19:00:00',
+              endHour: '19:30:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 3,
+              courtName: 'Q1 - Beach Tennis',
+              scheduleGridId: 302,
+              priceInCents: 2500,
+              hash: 'h-b2',
+              sport: 'padel',
+            },
+            {
+              date: '2026-11-19',
+              hour: '19:30:00',
+              startHour: '19:30:00',
+              endHour: '20:00:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 3,
+              courtName: 'Q1 - Beach Tennis',
+              scheduleGridId: 303,
+              priceInCents: 2500,
+              hash: 'h-b3',
+              sport: 'padel',
+            },
+          ],
+        },
+      ],
+    };
+
     const result = selectBestSlot(fixtureOnlySand, {
       startTime: '18:30',
       durationMinutes: 90,
       sport: 'padel',
+      allowNonPadelCourts: true,
     });
 
     expect(result).not.toBeNull();
@@ -534,6 +639,96 @@ describe('Gripo Slot Selection (selectBestSlot & findBestSlotForMatch)', () => {
     expect(result?.endHour).toBe('20:00');
     expect(result?.totalPriceCents).toBe(7500); // 3 * 2500
     expect(result?.slotIds).toEqual(['h-b1', 'h-b2', 'h-b3']);
+  });
+
+  it('(c) escolha dentro de janela (windowStart 18:00, windowEnd 21:00, start 18:30, duração 90) pega a primeira quadra de vidro que cubra o intervalo, mesmo que não comece exatamente 18:30', () => {
+    const fixtureWindow: GripoAvailabilityResponse = {
+      date: '2026-11-19',
+      courts: [
+        {
+          id: 1,
+          name: 'Quadra Padel 1',
+          type: 'Vidro',
+          hours: [
+            {
+              date: '2026-11-19',
+              hour: '18:00:00',
+              startHour: '18:00:00',
+              endHour: '18:30:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 1,
+              courtName: 'Quadra Padel 1',
+              scheduleGridId: 101,
+              priceInCents: 4000,
+              hash: 'h-w1',
+              sport: 'padel',
+            },
+            {
+              date: '2026-11-19',
+              hour: '18:30:00',
+              startHour: '18:30:00',
+              endHour: '19:00:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 1,
+              courtName: 'Quadra Padel 1',
+              scheduleGridId: 102,
+              priceInCents: 4000,
+              hash: 'h-w2',
+              sport: 'padel',
+            },
+            {
+              date: '2026-11-19',
+              hour: '19:00:00',
+              startHour: '19:00:00',
+              endHour: '19:30:00',
+              interval: 30,
+              available: true,
+              availableToSchedule: true,
+              courtId: 1,
+              courtName: 'Quadra Padel 1',
+              scheduleGridId: 103,
+              priceInCents: 4000,
+              hash: 'h-w3',
+              sport: 'padel',
+            },
+            {
+              date: '2026-11-19',
+              hour: '19:30:00',
+              startHour: '19:30:00',
+              endHour: '20:00:00',
+              interval: 30,
+              available: false,
+              availableToSchedule: false,
+              courtId: 1,
+              courtName: 'Quadra Padel 1',
+              scheduleGridId: 104,
+              priceInCents: 4000,
+              hash: 'h-w4',
+              sport: 'padel',
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = selectBestSlot(fixtureWindow, {
+      startTime: '18:30',
+      durationMinutes: 90,
+      windowStart: '18:00',
+      windowEnd: '21:00',
+      sport: 'padel',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.courtId).toBe(1);
+    expect(result?.courtName).toBe('Quadra Padel 1');
+    expect(result?.startHour).toBe('18:00');
+    expect(result?.endHour).toBe('19:30');
+    expect(result?.slotIds).toEqual(['h-w1', 'h-w2', 'h-w3']);
   });
 
   it('suporta slot único cobrindo a duração de 90 min (ex: 21:30 às 23:00)', () => {
@@ -695,6 +890,116 @@ describe('Gripo Slot Selection (selectBestSlot & findBestSlotForMatch)', () => {
       expect(result?.endHour).toBe('23:00');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('(d) cache: duas chamadas seguidas a findBestSlotForMatch no mesmo clube+data fazem só um fetch', async () => {
+    clearGripoAvailabilityCache();
+
+    const fetchSpy = vi.spyOn(gripoApi, 'fetchGripoAvailability').mockResolvedValue(racketCenterFixture);
+
+    try {
+      const res1 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      const res2 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      expect(res1).not.toBeNull();
+      expect(res2).toEqual(res1);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      clearGripoAvailabilityCache();
+
+      const res3 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      expect(res3).not.toBeNull();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchSpy.mockRestore();
+      clearGripoAvailabilityCache();
+    }
+  });
+
+  it('(d) cache: duas chamadas seguidas a findBestSlotForMatch no mesmo clube+data fazem só um fetch HTTP', async () => {
+    clearGripoAvailabilityCache();
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        date: '2026-11-19',
+        courts: racketCenterFixture.courts.map((c) => ({
+          id: c.id,
+          name: c.name,
+          type: c.type,
+          hours: c.hours.map((h) => ({
+            date: h.date,
+            hour: h.hour,
+            start_hour: h.startHour,
+            end_hour: h.endHour,
+            interval: h.interval,
+            available: h.available,
+            available_to_schedule: h.availableToSchedule,
+            court_id: h.courtId,
+            court: h.courtName,
+            schedule_grid_id: h.scheduleGridId,
+            price: h.priceInCents,
+            hash: h.hash,
+            sport: h.sport,
+          })),
+        })),
+      }),
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch;
+
+    try {
+      const res1 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      const res2 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      expect(res1).not.toBeNull();
+      expect(res2).toEqual(res1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      clearGripoAvailabilityCache();
+
+      const res3 = await findBestSlotForMatch({
+        clubId: 122,
+        date: '2026-11-19',
+        startTime: '21:30',
+        durationMinutes: 90,
+      });
+
+      expect(res3).not.toBeNull();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearGripoAvailabilityCache();
     }
   });
 });
